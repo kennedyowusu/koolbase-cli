@@ -3,6 +3,8 @@ package cmd
 import (
 	"fmt"
 
+	"strings"
+
 	"github.com/kennedyowusu/koolbase-cli/internal/api"
 	"github.com/kennedyowusu/koolbase-cli/internal/config"
 	"github.com/spf13/cobra"
@@ -77,8 +79,16 @@ var logsCmd = &cobra.Command{
 				fmt.Printf("   Error: %s\n", log.Error)
 			}
 			if log.Output != "" {
-				fmt.Printf("   Output: %s\n", log.Output)
-			}
+					output := log.Output
+					marker := "__KOOLBASE_RESULT__"
+					if idx := strings.Index(output, marker); idx >= 0 {
+						output = output[idx+len(marker):]
+					}
+					output = strings.TrimSpace(output)
+					if output != "" {
+						fmt.Printf("   Output: %s\n", output)
+					}
+				}
 			fmt.Println()
 		}
 		return nil
