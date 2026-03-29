@@ -36,4 +36,5 @@ func init() {
 	rootCmd.AddCommand(invokeCmd)
 	rootCmd.AddCommand(logsCmd)
 	rootCmd.AddCommand(functionsCmd)
+	rootCmd.AddCommand(cronsCmd)
 }

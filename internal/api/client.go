@@ -228,3 +228,81 @@ func (c *Client) GetFunctionLogs(projectID, functionID string, limit int) ([]Fun
 	}
 	return logs, nil
 }
+
+// ─── Crons ─────────────────────────────────────────────────────────────────
+
+type CronSchedule struct {
+	ID             string `json:"id"`
+	ProjectID      string `json:"project_id"`
+	FunctionName   string `json:"function_name"`
+	CronExpression string `json:"cron_expression"`
+	Enabled        bool   `json:"enabled"`
+	LastRunAt      string `json:"last_run_at"`
+	NextRunAt      string `json:"next_run_at"`
+	CreatedAt      string `json:"created_at"`
+}
+
+func (c *Client) ListCrons(projectID string) ([]CronSchedule, error) {
+	data, status, err := c.do("GET", "/v1/projects/"+projectID+"/crons", nil)
+	if err != nil {
+		return nil, err
+	}
+	if status != 200 {
+		return nil, fmt.Errorf("failed to list crons: %s", string(data))
+	}
+	var schedules []CronSchedule
+	if err := json.Unmarshal(data, &schedules); err != nil {
+		return nil, err
+	}
+	return schedules, nil
+}
+
+func (c *Client) CreateCron(projectID, functionName, cronExpression string) (*CronSchedule, error) {
+	data, status, err := c.do("POST", "/v1/projects/"+projectID+"/crons", map[string]string{
+		"function_name":   functionName,
+		"cron_expression": cronExpression,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var schedule CronSchedule
+	if err := json.Unmarshal(data, &schedule); err != nil {
+		return nil, err
+	}
+	if status != 201 {
+		var errResp struct{ Error string `json:"error"` }
+		json.Unmarshal(data, &errResp)
+		return nil, fmt.Errorf("failed to create cron: %s", errResp.Error)
+	}
+	return &schedule, nil
+}
+
+func (c *Client) DeleteCron(projectID, cronID string) error {
+	data, status, err := c.do("DELETE", "/v1/projects/"+projectID+"/crons/"+cronID, nil)
+	if err != nil {
+		return err
+	}
+	if status != 204 {
+		return fmt.Errorf("failed to delete cron: %s", string(data))
+	}
+	return nil
+}
+
+func (c *Client) UpdateCron(projectID, cronID string, enabled bool) (*CronSchedule, error) {
+	data, status, err := c.do("PATCH", "/v1/projects/"+projectID+"/crons/"+cronID, map[string]bool{
+		"enabled": enabled,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var schedule CronSchedule
+	if err := json.Unmarshal(data, &schedule); err != nil {
+		return nil, err
+	}
+	if status != 200 {
+		var errResp struct{ Error string `json:"error"` }
+		json.Unmarshal(data, &errResp)
+		return nil, fmt.Errorf("failed to update cron: %s", errResp.Error)
+	}
+	return &schedule, nil
+}

@@ -46,7 +46,7 @@ var loginCmd = &cobra.Command{
 			return fmt.Errorf("failed to save config: %w", err)
 		}
 
-		fmt.Printf("\n✅ Logged in as %s\n", resp.User.Email)
+		fmt.Printf("\n Logged in as %s\n", resp.User.Email)
 		fmt.Println("Run `koolbase functions list --project <project_id>` to see your functions.")
 		return nil
 	},

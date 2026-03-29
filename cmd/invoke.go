@@ -50,12 +50,12 @@ var invokeCmd = &cobra.Command{
 		}
 
 		if resp.Error != "" {
-			fmt.Printf("❌ Error: %s\n", resp.Error)
+			fmt.Printf(" Error: %s\n", resp.Error)
 			return nil
 		}
 
 		output, _ := json.MarshalIndent(resp.Body, "", "  ")
-		fmt.Printf("✅ Status: %d\n", resp.Status)
+		fmt.Printf(" Status: %d\n", resp.Status)
 		fmt.Printf("Response:\n%s\n", string(output))
 		if resp.LogID != "" {
 			fmt.Printf("\nLog ID: %s\n", resp.LogID)

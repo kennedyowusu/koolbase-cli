@@ -75,7 +75,7 @@ var deployCmd = &cobra.Command{
 			return err
 		}
 
-		fmt.Printf("\n✅ Deployed %s v%d\n", fn.Name, fn.Version)
+		fmt.Printf("\n Deployed %s v%d\n", fn.Name, fn.Version)
 		fmt.Printf("   Runtime:  %s\n", fn.Runtime)
 		fmt.Printf("   Timeout:  %dms\n", fn.TimeoutMs)
 		fmt.Printf("   Project:  %s\n", projectID)
