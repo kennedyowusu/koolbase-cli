@@ -18,7 +18,7 @@ var rootCmd = &cobra.Command{
 ██║  ██╗╚██████╔╝╚██████╔╝███████╗██████╔╝██║  ██║███████║███████╗
 ╚═╝  ╚═╝ ╚═════╝  ╚═════╝ ╚══════╝╚═════╝ ╚═╝  ╚═╝╚══════╝╚══════╝
 
-Flutter-first Backend as a Service.
+Backend as a Service for mobile developers.
 Docs: https://docs.koolbase.com
 `,
 }
