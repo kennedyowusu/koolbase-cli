@@ -16,26 +16,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// ─── Root bundle command ────────────────────────────────────────────────────
-
 var bundleCmd = &cobra.Command{
 	Use:   "bundle",
 	Short: "Manage runtime bundles for code push",
 }
 
-// ─── koolbase bundle deploy ─────────────────────────────────────────────────
-
 var bundleDeployCmd = &cobra.Command{
 	Use:   "deploy",
 	Short: "Package and deploy a runtime bundle",
-	Example: `  koolbase bundle deploy \
-    --app d2bc2c2c-fb42-4891-b758-45e48a1cd871 \
-    --platform ios \
-    --channel stable \
-    --base-app-version 1.0.0 \
-    --max-app-version 1.0.99 \
-    --bundle-dir ./bundle \
-    --rollout 100`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.Load()
 		if err != nil {
@@ -64,29 +52,31 @@ var bundleDeployCmd = &cobra.Command{
 			return fmt.Errorf("--max-app-version is required")
 		}
 
-		// Step 1 — validate bundle directory
+		// Step 1 — validate
 		fmt.Println("  Validating bundle directory...")
 		if err := validateBundleDir(bundleDir); err != nil {
 			return fmt.Errorf("invalid bundle directory: %w", err)
 		}
 		fmt.Println("  ✓ Bundle directory valid")
 
-		// Step 2 — read payload from directory
+		// Step 2 — read payload
 		payload, err := readPayload(bundleDir)
 		if err != nil {
 			return fmt.Errorf("could not read payload: %w", err)
 		}
 
-		// Step 3 — package into zip
-		fmt.Println("  Packaging bundle...")
-		zipPath, checksum, size, err := packageBundle(bundleDir, payload)
-		if err != nil {
-			return fmt.Errorf("packaging failed: %w", err)
-		}
-		defer os.Remove(zipPath)
-		fmt.Printf("  ✓ Packaged (%s)\n", humanizeBytes(size))
-
 		if dryRun {
+			fmt.Println("  Packaging bundle...")
+			zipPath, checksum, size, err := packageBundle(bundleDir, payload, bundleMeta{
+				bundleID: "dry-run", appID: appID, version: 0,
+				baseAppVersion: baseAppVersion, maxAppVersion: maxAppVersion,
+				platform: platform, channel: channel,
+			})
+			if err != nil {
+				return fmt.Errorf("packaging failed: %w", err)
+			}
+			os.Remove(zipPath)
+			fmt.Printf("  ✓ Packaged (%s)\n", humanizeBytes(size))
 			fmt.Println("\n  Dry run complete — no upload performed")
 			fmt.Printf("  Checksum: %s\n", checksum)
 			return nil
@@ -94,7 +84,7 @@ var bundleDeployCmd = &cobra.Command{
 
 		client := api.NewClient(cfg.BaseURL, cfg.APIKey)
 
-		// Step 4 — create draft bundle
+		// Step 3 — create draft to get real bundle ID + version
 		fmt.Println("  Creating bundle draft...")
 		bundle, err := client.CreateBundle(appID, api.CreateBundleRequest{
 			BaseAppVersion:    baseAppVersion,
@@ -102,9 +92,9 @@ var bundleDeployCmd = &cobra.Command{
 			Platform:          platform,
 			Channel:           channel,
 			RolloutPercentage: rollout,
-			Checksum:          checksum,
-			Signature:         "placeholder", // real signing in future phase
-			SizeBytes:         size,
+			Checksum:          "pending",
+			Signature:         "placeholder",
+			SizeBytes:         0,
 			Payload:           payload,
 		})
 		if err != nil {
@@ -112,14 +102,36 @@ var bundleDeployCmd = &cobra.Command{
 		}
 		fmt.Printf("  ✓ Draft created → %s (v%d)\n", bundle.ID, bundle.Version)
 
-		// Step 5 — upload artifact
+		// Step 4 — package with real bundle ID + version baked into manifest
+		fmt.Println("  Packaging bundle...")
+		zipPath, checksum, size, err := packageBundle(bundleDir, payload, bundleMeta{
+			bundleID:       bundle.ID,
+			appID:          appID,
+			version:        bundle.Version,
+			baseAppVersion: baseAppVersion,
+			maxAppVersion:  maxAppVersion,
+			platform:       platform,
+			channel:        channel,
+		})
+		if err != nil {
+			return fmt.Errorf("packaging failed: %w", err)
+		}
+		defer os.Remove(zipPath)
+		fmt.Printf("  ✓ Packaged (%s)\n", humanizeBytes(size))
+
+		// Step 5 — upload
 		fmt.Println("  Uploading artifact...")
 		if err := client.UploadBundleArtifact(appID, bundle.ID, zipPath); err != nil {
 			return fmt.Errorf("upload failed: %w", err)
 		}
 		fmt.Println("  ✓ Artifact uploaded")
 
-		// Step 6 — publish
+		// Step 6 — update checksum on the bundle record
+		if err := client.UpdateBundleChecksum(appID, bundle.ID, checksum, size); err != nil {
+			return fmt.Errorf("checksum update failed: %w", err)
+		}
+
+		// Step 7 — publish
 		fmt.Println("  Publishing...")
 		if err := client.PublishBundle(appID, bundle.ID); err != nil {
 			return fmt.Errorf("publish failed: %w", err)
@@ -130,12 +142,9 @@ var bundleDeployCmd = &cobra.Command{
 		fmt.Printf("  Bundle ID: %s\n", bundle.ID)
 		fmt.Printf("  Run `koolbase bundle recall --app %s --bundle %s` to roll back\n",
 			appID, bundle.ID)
-
 		return nil
 	},
 }
-
-// ─── koolbase bundle recall ─────────────────────────────────────────────────
 
 var bundleRecallCmd = &cobra.Command{
 	Use:   "recall",
@@ -145,29 +154,23 @@ var bundleRecallCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-
 		appID, _ := cmd.Flags().GetString("app")
 		bundleID, _ := cmd.Flags().GetString("bundle")
-
 		if appID == "" {
 			return fmt.Errorf("--app is required")
 		}
 		if bundleID == "" {
 			return fmt.Errorf("--bundle is required")
 		}
-
 		client := api.NewClient(cfg.BaseURL, cfg.APIKey)
 		if err := client.RecallBundle(appID, bundleID); err != nil {
 			return err
 		}
-
 		fmt.Printf("  ✓ Bundle %s recalled\n", bundleID)
 		fmt.Println("  Devices will revert on next cold launch")
 		return nil
 	},
 }
-
-// ─── koolbase bundle list ───────────────────────────────────────────────────
 
 var bundleListCmd = &cobra.Command{
 	Use:   "list",
@@ -177,32 +180,24 @@ var bundleListCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-
 		appID, _ := cmd.Flags().GetString("app")
 		if appID == "" {
 			return fmt.Errorf("--app is required")
 		}
-
 		client := api.NewClient(cfg.BaseURL, cfg.APIKey)
 		bundles, err := client.ListBundles(appID)
 		if err != nil {
 			return err
 		}
-
 		if len(bundles) == 0 {
 			fmt.Println("No bundles found")
 			return nil
 		}
-
-		fmt.Printf("\n  %-10s %-8s %-10s %-10s %-12s %-8s %s\n",
+		fmt.Printf("\n  %-10s %-8s %-10s %-12s %-12s %-8s %s\n",
 			"VERSION", "PLATFORM", "CHANNEL", "STATUS", "ROLLOUT", "SIZE", "CREATED")
-		fmt.Println("  " + string(make([]byte, 80)))
-
 		for _, b := range bundles {
-			fmt.Printf("  v%-9d %-8s %-10s %-10s %-12s %-8s %s\n",
-				b.Version,
-				b.Platform,
-				b.Channel,
+			fmt.Printf("  v%-9d %-8s %-10s %-12s %-12s %-8s %s\n",
+				b.Version, b.Platform, b.Channel,
 				statusIcon(b.Status),
 				fmt.Sprintf("%d%%", b.RolloutPercentage),
 				humanizeBytes(b.SizeBytes),
@@ -216,9 +211,18 @@ var bundleListCmd = &cobra.Command{
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
+type bundleMeta struct {
+	bundleID       string
+	appID          string
+	version        int
+	baseAppVersion string
+	maxAppVersion  string
+	platform       string
+	channel        string
+}
+
 func validateBundleDir(dir string) error {
-	required := []string{"config.json", "flags.json", "directives.json"}
-	for _, name := range required {
+	for _, name := range []string{"config.json", "flags.json", "directives.json"} {
 		path := filepath.Join(dir, name)
 		if _, err := os.Stat(path); os.IsNotExist(err) {
 			return fmt.Errorf("missing required file: %s", name)
@@ -251,8 +255,7 @@ func readPayload(dir string) (map[string]interface{}, error) {
 		var v map[string]interface{}
 		return v, json.Unmarshal(data, &v)
 	}
-
-	config, err := readJSON("config.json")
+	cfg, err := readJSON("config.json")
 	if err != nil {
 		return nil, fmt.Errorf("config.json: %w", err)
 	}
@@ -264,23 +267,16 @@ func readPayload(dir string) (map[string]interface{}, error) {
 	if err != nil {
 		return nil, fmt.Errorf("directives.json: %w", err)
 	}
-
 	return map[string]interface{}{
-		"config":     config,
+		"config":     cfg,
 		"flags":      flags,
 		"directives": directives,
-		"assets": map[string]interface{}{
-			"images": []string{},
-			"json":   []string{},
-			"fonts":  []string{},
-		},
+		"assets":     map[string]interface{}{"images": []string{}, "json": []string{}, "fonts": []string{}},
 	}, nil
 }
 
-func packageBundle(bundleDir string, payload map[string]interface{}) (zipPath, checksum string, size int, err error) {
-	zipPath = filepath.Join(os.TempDir(),
-		fmt.Sprintf("kbl_bundle_%d.zip", time.Now().UnixNano()))
-
+func packageBundle(bundleDir string, payload map[string]interface{}, meta bundleMeta) (zipPath, checksum string, size int, err error) {
+	zipPath = filepath.Join(os.TempDir(), fmt.Sprintf("kbl_bundle_%d.zip", time.Now().UnixNano()))
 	f, err := os.Create(zipPath)
 	if err != nil {
 		return "", "", 0, err
@@ -291,9 +287,18 @@ func packageBundle(bundleDir string, payload map[string]interface{}) (zipPath, c
 	w := io.MultiWriter(f, h)
 	zw := zip.NewWriter(w)
 
-	// Write manifest.json
 	manifestBytes, err := json.Marshal(map[string]interface{}{
-		"payload": payload,
+		"bundle_id":        meta.bundleID,
+		"app_id":           meta.appID,
+		"version":          meta.version,
+		"base_app_version": meta.baseAppVersion,
+		"max_app_version":  meta.maxAppVersion,
+		"platform":         meta.platform,
+		"channel":          meta.channel,
+		"checksum":         "pending",
+		"signature":        "pending",
+		"size_bytes":       0,
+		"payload":          payload,
 	})
 	if err != nil {
 		return "", "", 0, err
@@ -302,7 +307,6 @@ func packageBundle(bundleDir string, payload map[string]interface{}) (zipPath, c
 		return "", "", 0, err
 	}
 
-	// Write config.json, flags.json, directives.json
 	for _, name := range []string{"config.json", "flags.json", "directives.json"} {
 		data, err := os.ReadFile(filepath.Join(bundleDir, name))
 		if err != nil {
@@ -313,11 +317,10 @@ func packageBundle(bundleDir string, payload map[string]interface{}) (zipPath, c
 		}
 	}
 
-	// Walk assets/
 	assetsDir := filepath.Join(bundleDir, "assets")
-	err = filepath.WalkDir(assetsDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
+	err = filepath.WalkDir(assetsDir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil || d.IsDir() {
+			return walkErr
 		}
 		rel, _ := filepath.Rel(bundleDir, path)
 		data, err := os.ReadFile(path)
@@ -377,10 +380,7 @@ func formatTime(t string) string {
 	return parsed.Format("2006-01-02 15:04")
 }
 
-// ─── Flag registration ──────────────────────────────────────────────────────
-
 func init() {
-	// deploy flags
 	bundleDeployCmd.Flags().String("app", "", "App (project) ID (required)")
 	bundleDeployCmd.Flags().String("platform", "", "ios or android (required)")
 	bundleDeployCmd.Flags().String("channel", "stable", "Channel to deploy to")
@@ -390,14 +390,11 @@ func init() {
 	bundleDeployCmd.Flags().Int("rollout", 100, "Rollout percentage 0-100")
 	bundleDeployCmd.Flags().Bool("dry-run", false, "Validate and package without uploading")
 
-	// recall flags
 	bundleRecallCmd.Flags().String("app", "", "App (project) ID (required)")
 	bundleRecallCmd.Flags().String("bundle", "", "Bundle ID to recall (required)")
 
-	// list flags
 	bundleListCmd.Flags().String("app", "", "App (project) ID (required)")
 
-	// register subcommands
 	bundleCmd.AddCommand(bundleDeployCmd)
 	bundleCmd.AddCommand(bundleRecallCmd)
 	bundleCmd.AddCommand(bundleListCmd)

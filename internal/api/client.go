@@ -438,3 +438,19 @@ func (c *Client) ListBundles(appID string) ([]Bundle, error) {
 	}
 	return resp.Bundles, nil
 }
+
+func (c *Client) UpdateBundleChecksum(appID, bundleID, checksum string, sizeBytes int) error {
+	data, status, err := c.do("PATCH", "/v1/apps/"+appID+"/bundles/"+bundleID+"/checksum", map[string]interface{}{
+		"checksum":   checksum,
+		"size_bytes": sizeBytes,
+	})
+	if err != nil {
+		return err
+	}
+	if status != 200 {
+		var errResp struct{ Error string `json:"error"` }
+		json.Unmarshal(data, &errResp)
+		return fmt.Errorf("checksum update failed: %s", errResp.Error)
+	}
+	return nil
+}
