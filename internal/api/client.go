@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -305,4 +308,133 @@ func (c *Client) UpdateCron(projectID, cronID string, enabled bool) (*CronSchedu
 		return nil, fmt.Errorf("failed to update cron: %s", errResp.Error)
 	}
 	return &schedule, nil
+}
+
+// ─── Code Push ─────────────────────────────────────────────────────────────
+
+type Bundle struct {
+	ID                string `json:"bundle_id"`
+	AppID             string `json:"app_id"`
+	Version           int    `json:"version"`
+	BaseAppVersion    string `json:"base_app_version"`
+	MaxAppVersion     string `json:"max_app_version"`
+	Platform          string `json:"platform"`
+	Channel           string `json:"channel"`
+	Status            string `json:"status"`
+	RolloutPercentage int    `json:"rollout_percentage"`
+	Checksum          string `json:"checksum"`
+	SizeBytes         int    `json:"size_bytes"`
+	StorageKey        string `json:"storage_key"`
+	CreatedAt         string `json:"created_at"`
+}
+
+type CreateBundleRequest struct {
+	BaseAppVersion    string                 `json:"base_app_version"`
+	MaxAppVersion     string                 `json:"max_app_version"`
+	Platform          string                 `json:"platform"`
+	Channel           string                 `json:"channel"`
+	RolloutPercentage int                    `json:"rollout_percentage"`
+	Checksum          string                 `json:"checksum"`
+	Signature         string                 `json:"signature"`
+	SizeBytes         int                    `json:"size_bytes"`
+	Payload           map[string]interface{} `json:"payload"`
+}
+
+func (c *Client) CreateBundle(appID string, req CreateBundleRequest) (*Bundle, error) {
+	data, status, err := c.do("POST", "/v1/apps/"+appID+"/bundles", req)
+	if err != nil {
+		return nil, err
+	}
+	var bundle Bundle
+	if err := json.Unmarshal(data, &bundle); err != nil {
+		return nil, err
+	}
+	if status != 201 {
+		var errResp struct{ Error string `json:"error"` }
+		json.Unmarshal(data, &errResp)
+		return nil, fmt.Errorf("failed to create bundle: %s", errResp.Error)
+	}
+	return &bundle, nil
+}
+
+func (c *Client) UploadBundleArtifact(appID, bundleID, zipPath string) error {
+	f, err := os.Open(zipPath)
+	if err != nil {
+		return fmt.Errorf("could not open zip: %w", err)
+	}
+	defer f.Close()
+
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	part, err := writer.CreateFormFile("artifact", filepath.Base(zipPath))
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(part, f); err != nil {
+		return err
+	}
+	writer.Close()
+
+	url := c.baseURL + "/v1/apps/" + appID + "/bundles/" + bundleID + "/upload"
+	req, err := http.NewRequest("POST", url, &buf)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("upload failed: %s", string(body))
+	}
+	return nil
+}
+
+func (c *Client) PublishBundle(appID, bundleID string) error {
+	data, status, err := c.do("POST", "/v1/apps/"+appID+"/bundles/"+bundleID+"/publish", nil)
+	if err != nil {
+		return err
+	}
+	if status != 200 {
+		var errResp struct{ Error string `json:"error"` }
+		json.Unmarshal(data, &errResp)
+		return fmt.Errorf("publish failed: %s", errResp.Error)
+	}
+	return nil
+}
+
+func (c *Client) RecallBundle(appID, bundleID string) error {
+	data, status, err := c.do("POST", "/v1/apps/"+appID+"/bundles/"+bundleID+"/recall", nil)
+	if err != nil {
+		return err
+	}
+	if status != 200 {
+		var errResp struct{ Error string `json:"error"` }
+		json.Unmarshal(data, &errResp)
+		return fmt.Errorf("recall failed: %s", errResp.Error)
+	}
+	return nil
+}
+
+func (c *Client) ListBundles(appID string) ([]Bundle, error) {
+	data, status, err := c.do("GET", "/v1/apps/"+appID+"/bundles", nil)
+	if err != nil {
+		return nil, err
+	}
+	if status != 200 {
+		return nil, fmt.Errorf("failed to list bundles: %s", string(data))
+	}
+	var resp struct {
+		Bundles []Bundle `json:"bundles"`
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Bundles, nil
 }

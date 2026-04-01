@@ -37,4 +37,5 @@ func init() {
 	rootCmd.AddCommand(logsCmd)
 	rootCmd.AddCommand(functionsCmd)
 	rootCmd.AddCommand(cronsCmd)
+	rootCmd.AddCommand(bundleCmd)
 }
