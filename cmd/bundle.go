@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/kennedyowusu/koolbase-cli/internal/api"
@@ -267,11 +268,24 @@ func readPayload(dir string) (map[string]interface{}, error) {
 	if err != nil {
 		return nil, fmt.Errorf("directives.json: %w", err)
 	}
+	// Scan screens/ directory for .rfw files
+	screens := map[string]string{}
+	screensDir := filepath.Join(dir, "screens")
+	if entries, err := os.ReadDir(screensDir); err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() && filepath.Ext(entry.Name()) == ".rfw" {
+				screenID := strings.TrimSuffix(entry.Name(), ".rfw")
+				screens[screenID] = entry.Name()
+			}
+		}
+	}
+
 	return map[string]interface{}{
 		"config":     cfg,
 		"flags":      flags,
 		"directives": directives,
 		"assets":     map[string]interface{}{"images": []string{}, "json": []string{}, "fonts": []string{}},
+		"screens":    screens,
 	}, nil
 }
 
@@ -331,6 +345,28 @@ func packageBundle(bundleDir string, payload map[string]interface{}, meta bundle
 	})
 	if err != nil {
 		return "", "", 0, err
+	}
+
+	// Walk screens/ directory for .rfw files
+	screensDir2 := filepath.Join(bundleDir, "screens")
+	if _, err := os.Stat(screensDir2); err == nil {
+		err = filepath.WalkDir(screensDir2, func(path string, d fs.DirEntry, walkErr error) error {
+			if walkErr != nil || d.IsDir() {
+				return walkErr
+			}
+			if filepath.Ext(d.Name()) != ".rfw" {
+				return nil
+			}
+			rel, _ := filepath.Rel(bundleDir, path)
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			return writeZipEntry(zw, rel, data)
+		})
+		if err != nil {
+			return "", "", 0, err
+		}
 	}
 
 	if err := zw.Close(); err != nil {

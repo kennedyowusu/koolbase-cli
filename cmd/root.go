@@ -38,4 +38,5 @@ func init() {
 	rootCmd.AddCommand(functionsCmd)
 	rootCmd.AddCommand(cronsCmd)
 	rootCmd.AddCommand(bundleCmd)
+	rootCmd.AddCommand(pushCmd)
 }
