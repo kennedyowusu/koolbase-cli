@@ -60,8 +60,14 @@ var deployCmd = &cobra.Command{
 
 		// For Dart functions, auto-detect a sibling pubspec.yaml.
 		// If present, packages will be resolved server-side at deploy time.
+		//
+		// Matched by prefix so every Dart runtime is covered -- "dart" and every
+		// dart-standard profile version, including ones shipped after this CLI was
+		// built. The server owns which runtimes are valid; a mismatch is rejected
+		// there. Gating on an exact string would silently drop a developer's
+		// declared dependencies whenever they used a runtime this build predates.
 		var pubspec *string
-		if runtime == "dart" {
+		if strings.HasPrefix(runtime, "dart") {
 			pubspecPath := filepath.Join(filepath.Dir(file), "pubspec.yaml")
 			if data, err := os.ReadFile(pubspecPath); err == nil {
 				s := string(data)
@@ -119,7 +125,7 @@ var deployCmd = &cobra.Command{
 
 func init() {
 	deployCmd.Flags().StringP("file", "f", "", "Path to the function file (.ts, .dart)")
-	deployCmd.Flags().StringP("runtime", "r", "", "Runtime: deno (default) or dart (auto-detected from file extension)")
+	deployCmd.Flags().StringP("runtime", "r", "", "Runtime: deno, dart, or dart-standard (curated profile). Auto-detected from file extension when omitted.")
 	deployCmd.Flags().StringP("project", "p", "", "Project ID")
 	deployCmd.Flags().Int("timeout", 10000, "Execution timeout in milliseconds (max 30000)")
 	deployCmd.Flags().Bool("requires-auth", false, "Reject anonymous SDK/HTTP invocations of this function (omit flag to leave current value unchanged on redeploy)")
