@@ -69,11 +69,10 @@ func (c *Client) SeedApply(projectID string, req SeedApplyRequest, dryRun bool) 
 	if dryRun {
 		path += "?dry_run=true"
 	}
-	body, err := json.Marshal(req)
-	if err != nil {
-		return SeedApplyResult{}, err
-	}
-	data, status, err := c.do("POST", path, body)
+	// do marshals the body itself. Passing pre-marshalled bytes would
+	// base64-encode them into a JSON string and the server would receive a
+	// string where an object belongs.
+	data, status, err := c.do("POST", path, req)
 	if err != nil {
 		return SeedApplyResult{}, err
 	}
