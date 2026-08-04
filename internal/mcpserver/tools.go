@@ -1074,6 +1074,13 @@ Queries — a BUILDER CHAIN off collection():
     final records = result.records;                // List<KoolbaseRecord>
     // .stream on the same query emits refreshed results (SWR second arrival).
 
+Records — system fields are typed properties, custom fields live in .data:
+    record.id / record.createdAt / record.updatedAt / record.createdBy
+    record.data['your_field']                      // Map<String, dynamic>
+    record.revision                                // int?, pass back on update/
+                                                   // delete for a conditional
+                                                   // write (fails if changed)
+
 Writes:
     await Koolbase.db.insert(collection: 'expenses', data: {...});
     await Koolbase.db.upsert(...);
