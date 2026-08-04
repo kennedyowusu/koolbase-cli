@@ -22,8 +22,8 @@ func (s *Server) registerTools() {
 	s.addGetProject()
 	s.addDescribeProject()
 	s.addGetCollection()
+	s.addSdkConventions()
 	s.addListEnvironments()
-	s.addGetCollection()
 	s.addListFlags()
 	s.addSetFlag()
 	s.addListConfigs()
@@ -997,4 +997,184 @@ Function bodies and secrets are deliberately never returned.`),
 		}
 		return nil, out, nil
 	})
+}
+
+// --- sdk_conventions (the idioms, as a callable) -----------------------------
+//
+// describe_project tells an agent WHAT exists; this tells it HOW to talk to
+// it. Authored from the SDK sources directly (hatchway_flutter and
+// koolbase-react-native), not from docs prose — the code is the ground truth
+// and the docs are downstream of it. Semantic claims (stale-while-revalidate,
+// the offline contract, the signed-out throw) are shared between platforms in
+// sdkSharedConventions so the two dialects cannot drift apart on meaning.
+
+const sdkSharedConventions = `
+# Koolbase SDK — semantics shared by every platform
+
+INITIALIZATION. Koolbase is a singleton. Initialize once at app startup with
+the project's config, then access subsystems as properties: Koolbase.auth,
+Koolbase.db, Koolbase.storage, Koolbase.realtime, Koolbase.functions. Never
+construct or inject a client object; there is no client to pass around.
+
+AUTH STATE. Koolbase.auth.currentUser is a SYNCHRONOUS property returning the
+signed-in user or null — no await needed to read it. The user's id is the .id
+property. Subscribe to auth changes for reactive UI. Call restoreSession() at
+startup to resume a persisted session before deciding the user is signed out.
+
+QUERIES ARE STALE-WHILE-REVALIDATE. A query returns the cached result
+immediately when one exists, then refreshes from the network in the
+background. Design UI for data that can arrive twice: render the first
+result, update when the refresh lands. Do not treat the first result as
+final.
+
+WRITES ARE OFFLINE-AWARE. Inserts made offline are queued per-user and sync
+when connectivity returns. Records carry server-assigned system fields: $id,
+$createdAt, $updatedAt, $revision (id/createdAt/updatedAt/revision on the
+model objects). Never invent or overwrite these.
+
+THE OFFLINE CONTRACT — verified behavior, do not soften it in generated code:
+- pendingWrites() and conflicts() THROW an unauthenticated error when no user
+  is signed in. They do not return an empty list. Any code path that calls
+  them while possibly signed out must handle the throw.
+- Conflicts do not expire. Something in the UI must surface them
+  (watch/subscribe to conflicts) or they sit unresolved forever.
+- Conflict resolution is explicit: resolve with the local version, the server
+  version, a merge, or discard. Resolvers require a signed-in user.
+- After connectivity returns, syncPendingWrites() drains the queue; observe
+  pendingWrites before/after if the UI needs a sync indicator.
+
+ACCESS RULES ARE SERVER-ENFORCED. The rules from koolbase_describe_project are
+enforced server-side; client code cannot bypass them. Generated code should
+COOPERATE with them: filter scoped reads on the rule's owner_field equal to
+the caller's caller_key value, populate scoped writes with it, and never
+generate client calls against a server_only verb. A 401 clears the stored
+session — treat it as "signed out", not as a retryable error.
+`
+
+const sdkFlutterConventions = `
+# Flutter dialect — package koolbase_flutter (import 'package:koolbase_flutter/koolbase_flutter.dart')
+
+Initialize:
+    await Koolbase.initialize(KoolbaseConfig(...));
+
+Auth:
+    final user = Koolbase.auth.currentUser;      // KoolbaseUser?, sync
+    final id = user?.id;                          // String
+    Koolbase.auth.authStateChanges                // Stream<KoolbaseUser?>
+    await Koolbase.auth.restoreSession();
+    await Koolbase.auth.login(...); / signUp(...); / logout();
+
+Queries — a BUILDER CHAIN off collection():
+    final result = await Koolbase.db
+        .collection('expenses')
+        .where('user_id', isEqualTo: user.id)     // named param isEqualTo
+        .orderBy('created_at', descending: true)
+        .limit(20)
+        .get();                                    // Future<QueryResult>
+    final records = result.records;                // List<KoolbaseRecord>
+    // .stream on the same query emits refreshed results (SWR second arrival).
+
+Writes:
+    await Koolbase.db.insert(collection: 'expenses', data: {...});
+    await Koolbase.db.upsert(...);
+    await Koolbase.db.deleteWhere(...);
+    await Koolbase.db.batch([...]);
+
+Offline surface:
+    await Koolbase.db.pendingWrites();            // THROWS signed out
+    Koolbase.db.watchPendingWrites();             // Stream<List<PendingWrite>>
+    await Koolbase.db.conflicts();                // THROWS signed out
+    Koolbase.db.watchConflicts();                 // Stream<List<KoolbaseConflict>>
+    await Koolbase.db.syncPendingWrites();
+    // Resolve on the conflict object: resolveWithLocal / resolveWithMerge / ...
+
+Flags and config:
+    Koolbase.isEnabled('flag_key');               // bool, sync
+    Koolbase.configString('key', fallback: '');
+`
+
+const sdkReactNativeConventions = `
+# React Native dialect — package @koolbase/react-native (import { Koolbase } from '@koolbase/react-native')
+
+Initialize:
+    await Koolbase.initialize({ ... });
+
+Auth:
+    const user = Koolbase.auth.currentUser;       // KoolbaseUser | null, sync
+    const id = user?.id;                          // string
+    const unsubscribe = Koolbase.auth.onAuthStateChange(listener);
+    await Koolbase.auth.restoreSession();
+    await Koolbase.auth.login({...}); / register({...}); / logout();
+
+Queries — METHODS WITH AN OPTIONS OBJECT, NOT a builder chain. The Flutter
+SDK's chained query builder does not exist in this SDK; do not generate one:
+    const result = await Koolbase.db.query('expenses', {
+      filters: { user_id: user.id },
+      orderBy: 'created_at',
+      limit: 20,
+    });
+    // Same stale-while-revalidate semantics as Flutter: cached first,
+    // background refresh after.
+
+Writes:
+    await Koolbase.db.insert('expenses', { ... });
+    await Koolbase.db.update('expenses', recordId, { ... });
+    await Koolbase.db.upsert('expenses', match, { ... });
+    await Koolbase.db.deleteWhere('expenses', filters);
+    await Koolbase.db.batch(operations);
+
+Offline surface:
+    await Koolbase.db.pendingWrites();            // THROWS signed out
+    await Koolbase.db.conflicts();                // THROWS signed out
+    await Koolbase.db.syncPendingWrites();
+`
+
+type sdkConventionsIn struct {
+	Platform string `json:"platform" jsonschema:"which client SDK the code targets: flutter or react_native"`
+}
+
+type sdkConventionsOut struct {
+	Platform    string `json:"platform"`
+	Conventions string `json:"conventions" jsonschema:"the SDK idioms to follow when generating code for this platform — read fully before writing any Koolbase client code"`
+}
+
+// addSdkConventions registers the idioms tool: the HOW that pairs with
+// describe_project's WHAT. Returned as content the agent reads before writing
+// code, per platform, so a Flutter chain never appears in TypeScript and an
+// options object never appears in Dart.
+func (s *Server) addSdkConventions() {
+	mcp.AddTool(s.mcp, &mcp.Tool{
+		Name: "koolbase_sdk_conventions",
+		Description: strings.TrimSpace(`
+Return the Koolbase client SDK's idioms for one platform: initialization, auth
+access, the query pattern (and its stale-while-revalidate semantics), the
+offline-aware write path, and the conflict surface. Call this BEFORE writing
+any code that uses the Koolbase SDK, and follow it exactly — the two platforms
+share semantics but have DIFFERENT call shapes (Flutter chains queries;
+React Native passes an options object). Pair with koolbase_describe_project:
+that tool says what exists and who may touch it, this one says how to call it.`),
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in sdkConventionsIn) (*mcp.CallToolResult, sdkConventionsOut, error) {
+		content, err := sdkConventionsFor(in.Platform)
+		if err != nil {
+			return nil, sdkConventionsOut{}, err
+		}
+		return nil, sdkConventionsOut{Platform: in.Platform, Conventions: content}, nil
+	})
+}
+
+// sdkConventionsFor assembles the conventions content for one platform:
+// shared semantics first (the claims both dialects must agree on), then the
+// platform's own call shapes. Unknown platforms fail naming the valid ones so
+// a guessing agent self-corrects in one turn.
+func sdkConventionsFor(platform string) (string, error) {
+	var dialect string
+	switch platform {
+	case "flutter":
+		dialect = sdkFlutterConventions
+	case "react_native":
+		dialect = sdkReactNativeConventions
+	default:
+		return "", fmt.Errorf("unknown platform %q — valid platforms: flutter, react_native", platform)
+	}
+	return strings.TrimSpace(sdkSharedConventions) + "\n\n" + strings.TrimSpace(dialect), nil
 }

@@ -363,3 +363,62 @@ func TestProjectSnapshot_EmptySectionsAreArraysNotNull(t *testing.T) {
 		}
 	}
 }
+
+// --- sdk_conventions tests ---------------------------------------------------
+
+// Both platforms must return content carrying the shared semantics — the
+// claims that must never drift between dialects (SWR, the signed-out throw,
+// conflicts not expiring).
+func TestSdkConventions_SharedSemanticsInBothPlatforms(t *testing.T) {
+	for _, platform := range []string{"flutter", "react_native"} {
+		content, err := sdkConventionsFor(platform)
+		if err != nil {
+			t.Fatalf("platform %q errored: %v", platform, err)
+		}
+		for _, claim := range []string{"stale-while-revalidate", "THROW", "Conflicts do not expire", "server-enforced"} {
+			if !strings.Contains(strings.ToLower(content), strings.ToLower(claim)) {
+				t.Fatalf("platform %q conventions missing shared claim %q", platform, claim)
+			}
+		}
+	}
+}
+
+// Dialects must not bleed: the Flutter builder chain must not appear in the
+// RN content, and RN's query-with-options shape must not appear in Flutter's.
+// This is the exact confusion the tool exists to prevent.
+func TestSdkConventions_DialectsDoNotBleed(t *testing.T) {
+	flutter, err := sdkConventionsFor("flutter")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rn, err := sdkConventionsFor("react_native")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(flutter, ".collection('expenses')") {
+		t.Fatal("flutter conventions must teach the builder chain")
+	}
+	if !strings.Contains(rn, "Koolbase.db.query('expenses'") {
+		t.Fatal("react_native conventions must teach query-with-options")
+	}
+	if strings.Contains(rn, ".where(") {
+		t.Fatal("the Flutter .where chain leaked into react_native conventions")
+	}
+	if strings.Contains(flutter, "Koolbase.db.query(") {
+		t.Fatal("the RN query-with-options shape leaked into flutter conventions")
+	}
+}
+
+// An unknown platform must fail naming the valid ones, so an agent that
+// guesses (e.g. "reactnative", "ios") self-corrects in one turn.
+func TestSdkConventions_UnknownPlatformFailsNamingValid(t *testing.T) {
+	_, err := sdkConventionsFor("swift")
+	if err == nil {
+		t.Fatal("unknown platform must error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "swift") || !strings.Contains(msg, "flutter") || !strings.Contains(msg, "react_native") {
+		t.Fatalf("error must name the bad platform and the valid ones, got: %v", msg)
+	}
+}
