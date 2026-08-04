@@ -20,6 +20,7 @@ func (s *Server) registerTools() {
 	s.addWhoami()
 	s.addListProjects()
 	s.addGetProject()
+	s.addDescribeProject()
 	s.addListEnvironments()
 	s.addListFlags()
 	s.addSetFlag()
@@ -390,7 +391,7 @@ func (s *Server) addSetConfig() {
 		}
 	}
 	mcp.AddTool(s.mcp, &mcp.Tool{
-		Name: "koolbase_set_config",
+		Name:         "koolbase_set_config",
 		OutputSchema: outSchema,
 		Description: "Update a Koolbase remote-config value or description. Only fields you provide change; others keep current values. " +
 			"The value must be a JSON literal matching the config's value_type (string/number/boolean/json) — the server rejects a type mismatch. " +
@@ -524,7 +525,6 @@ func (s *Server) addListPatches() {
 	})
 }
 
-
 // --- publish_patch / recall_patch (gated: --enable-codepush-mutations) ------
 
 type publishPatchIn struct {
@@ -606,6 +606,234 @@ func (s *Server) addRecallPatch() {
 		out, err := s.patchState(in.ProjectID, in.PatchID)
 		if err != nil {
 			return nil, patchActionOut{}, fmt.Errorf("recalled, but state re-read failed: %w", err)
+		}
+		return nil, out, nil
+	})
+}
+
+// --- describe_project -------------------------------------------------------
+//
+// The schema layer: the tool that lets an agent generate code against a real
+// project instead of guessing at it. Everything here is a PROJECTION of the
+// snapshot artifact, never a passthrough — see projectSnapshot below.
+
+// accessRule is a collection's rule for one verb, as DATA rather than prose.
+//
+// An agent handed {"kind":"scoped","owner_field":"created_by"} cannot justify
+// generating an unscoped write. An agent handed "remember to scope writes"
+// absolutely will. Every rule kind the platform has gets a representation here.
+type accessRule struct {
+	Kind string `json:"kind" jsonschema:"one of: public, authenticated, server_only, scoped, conditional"`
+	// OwnerField is set only for kind=scoped: the field holding the owning
+	// user's id. Generated writes MUST populate it and generated reads MUST
+	// filter on it.
+	OwnerField *string `json:"owner_field,omitempty" jsonschema:"for kind=scoped: the field carrying the owning user id"`
+	// Mode and Conditions are set only for kind=conditional.
+	Mode       string          `json:"mode,omitempty" jsonschema:"for kind=conditional: how conditions combine"`
+	Conditions json.RawMessage `json:"conditions,omitempty" jsonschema:"for kind=conditional: the rule conditions, as declared"`
+}
+
+// collectionOut is one collection's name and governance.
+//
+// Deliberately carries NO field list. Koolbase collections are schemaless:
+// db_collections stores a name and rules, nothing more. Emitting a typed field
+// list would mean inventing one, and a hallucinated schema is worse than an
+// absent one — the developer's first experience would be debugging.
+type collectionOut struct {
+	Name       string     `json:"name"`
+	Read       accessRule `json:"read"`
+	Write      accessRule `json:"write"`
+	Delete     accessRule `json:"delete"`
+	AppendOnly bool       `json:"append_only" jsonschema:"when true, existing records cannot be updated or deleted"`
+}
+
+type bucketOut struct {
+	Name              string   `json:"name"`
+	Public            bool     `json:"public"`
+	AccessMode        string   `json:"access_mode"`
+	MaxSizeBytes      *int64   `json:"max_size_bytes,omitempty"`
+	MaxFileSizeBytes  *int64   `json:"max_file_size_bytes,omitempty"`
+	AllowedMimeTypes  []string `json:"allowed_mime_types,omitempty"`
+	VersioningEnabled bool     `json:"versioning_enabled"`
+}
+
+// functionOut is a deployed function's SIGNATURE. Never its body.
+//
+// The snapshot embeds function source so a clone can redeploy without the
+// source repository. An agent needs to know `settle` exists and requires auth;
+// it has no business receiving the implementation. Source and pubspec are
+// dropped by omission from this type — see projectSnapshot.
+type functionOut struct {
+	Name         string `json:"name"`
+	Runtime      string `json:"runtime"`
+	TimeoutMs    int    `json:"timeout_ms"`
+	RequiresAuth bool   `json:"requires_auth"`
+	Enabled      bool   `json:"enabled"`
+}
+
+type environmentOut struct {
+	Name string `json:"name"`
+	Slug string `json:"slug"`
+}
+
+type describeProjectOut struct {
+	ProjectID    string           `json:"project_id"`
+	Collections  []collectionOut  `json:"collections"`
+	Environments []environmentOut `json:"environments"`
+	Buckets      []bucketOut      `json:"buckets"`
+	Functions    []functionOut    `json:"functions"`
+}
+
+// snapshotShape is the subset of the server's snapshot artifact this tool
+// reads. It is deliberately NOT the server's Snapshot type: naming only the
+// fields we consume means a new server-side section (secrets, crons, whatever
+// ships next) is invisible here until someone chooses to expose it. Silence is
+// the safe default for a surface an agent reads.
+type snapshotShape struct {
+	SourceProjectID string `json:"source_project_id"`
+	Collections     []struct {
+		Name           string          `json:"name"`
+		ReadRule       string          `json:"read_rule"`
+		WriteRule      string          `json:"write_rule"`
+		DeleteRule     string          `json:"delete_rule"`
+		OwnerField     *string         `json:"owner_field"`
+		RuleMode       string          `json:"rule_mode"`
+		RuleConditions json.RawMessage `json:"rule_conditions"`
+		AppendOnly     bool            `json:"append_only"`
+	} `json:"collections"`
+	Environments []struct {
+		Name string `json:"name"`
+		Slug string `json:"slug"`
+	} `json:"environments"`
+	Buckets []struct {
+		Name              string   `json:"name"`
+		Public            bool     `json:"public"`
+		AccessMode        string   `json:"access_mode"`
+		MaxSizeBytes      *int64   `json:"max_size_bytes"`
+		MaxFileSizeBytes  *int64   `json:"max_file_size_bytes"`
+		AllowedMimeTypes  []string `json:"allowed_mime_types"`
+		VersioningEnabled bool     `json:"versioning_enabled"`
+	} `json:"buckets"`
+	Functions []struct {
+		Name         string `json:"name"`
+		Runtime      string `json:"runtime"`
+		TimeoutMs    int    `json:"timeout_ms"`
+		RequiresAuth bool   `json:"requires_auth"`
+		Enabled      bool   `json:"enabled"`
+	} `json:"functions"`
+}
+
+// ruleFor shapes one rule string plus its satellite columns into structured
+// data. owner_field rides only with `scoped`, and mode/conditions only with
+// `conditional`, so the output never suggests a field is meaningful where the
+// platform ignores it.
+func ruleFor(kind string, ownerField *string, mode string, conditions json.RawMessage) accessRule {
+	r := accessRule{Kind: kind}
+	switch kind {
+	case "scoped":
+		r.OwnerField = ownerField
+	case "conditional":
+		r.Mode = mode
+		if len(conditions) > 0 && string(conditions) != "null" {
+			r.Conditions = conditions
+		}
+	}
+	return r
+}
+
+// projectSnapshot converts a raw snapshot payload into the agent-facing
+// description.
+//
+// This is an ALLOW-LIST projection, and that is the whole safety property: the
+// output is built field by named field. The snapshot carries function source
+// and secret names; neither has a route into the result, and neither does
+// whatever the server adds next. Passing the payload through — or projecting
+// by deletion rather than construction — would make every future server field
+// an agent-visible one by default.
+func projectSnapshot(raw []byte) (describeProjectOut, error) {
+	var snap snapshotShape
+	if err := json.Unmarshal(raw, &snap); err != nil {
+		return describeProjectOut{}, fmt.Errorf("failed to parse project snapshot: %w", err)
+	}
+
+	out := describeProjectOut{
+		ProjectID:    snap.SourceProjectID,
+		Collections:  []collectionOut{},
+		Environments: []environmentOut{},
+		Buckets:      []bucketOut{},
+		Functions:    []functionOut{},
+	}
+
+	for _, c := range snap.Collections {
+		out.Collections = append(out.Collections, collectionOut{
+			Name:       c.Name,
+			Read:       ruleFor(c.ReadRule, c.OwnerField, c.RuleMode, c.RuleConditions),
+			Write:      ruleFor(c.WriteRule, c.OwnerField, c.RuleMode, c.RuleConditions),
+			Delete:     ruleFor(c.DeleteRule, c.OwnerField, c.RuleMode, c.RuleConditions),
+			AppendOnly: c.AppendOnly,
+		})
+	}
+	for _, e := range snap.Environments {
+		out.Environments = append(out.Environments, environmentOut{Name: e.Name, Slug: e.Slug})
+	}
+	for _, b := range snap.Buckets {
+		out.Buckets = append(out.Buckets, bucketOut{
+			Name: b.Name, Public: b.Public, AccessMode: b.AccessMode,
+			MaxSizeBytes: b.MaxSizeBytes, MaxFileSizeBytes: b.MaxFileSizeBytes,
+			AllowedMimeTypes: b.AllowedMimeTypes, VersioningEnabled: b.VersioningEnabled,
+		})
+	}
+	for _, f := range snap.Functions {
+		out.Functions = append(out.Functions, functionOut{
+			Name: f.Name, Runtime: f.Runtime, TimeoutMs: f.TimeoutMs,
+			RequiresAuth: f.RequiresAuth, Enabled: f.Enabled,
+		})
+	}
+	return out, nil
+}
+
+// describeProjectIn is the tool's input.
+type describeProjectIn struct {
+	ProjectID string `json:"project_id" jsonschema:"UUID of the project to describe. Resolve one via koolbase_list_projects if unknown."`
+}
+
+func (s *Server) addDescribeProject() {
+	mcp.AddTool(s.mcp, &mcp.Tool{
+		Name: "koolbase_describe_project",
+		Description: strings.TrimSpace(`
+Describe a Koolbase project's shape so you can write code against it: its
+collections and their access rules, storage buckets, deployed function
+signatures, and environments. Call this BEFORE generating any code that reads
+or writes Koolbase data.
+
+Access rules are returned as structured data, one per verb (read/write/delete).
+Rule kinds:
+  public         — anyone, signed in or not
+  authenticated  — any signed-in user
+  scoped         — signed-in users, restricted to records they own. The rule
+                   carries owner_field: reads MUST filter on it and writes MUST
+                   populate it with the signed-in user's id.
+  server_only    — only functions and server-side code. Client SDK calls are
+                   refused; do not generate client code for this verb.
+  conditional    — allowed when the rule's conditions hold; the rule carries
+                   mode and conditions as declared.
+A collection with append_only=true admits new records but no updates or deletes.
+
+Koolbase collections are SCHEMALESS: a collection is a governed container, and
+records carry whatever fields the application writes. This tool therefore
+returns no field list or field types, because the platform holds none — do not
+infer a fixed schema, and do not invent field names. Every record additionally
+carries $id, $createdAt, $updatedAt and $revision.
+
+Function bodies and secrets are deliberately never returned.`),
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in describeProjectIn) (*mcp.CallToolResult, describeProjectOut, error) {
+		raw, err := s.client.SnapshotPull(in.ProjectID)
+		if err != nil {
+			return nil, describeProjectOut{}, mapScopeErr(err)
+		}
+		out, err := projectSnapshot(raw)
+		if err != nil {
+			return nil, describeProjectOut{}, err
 		}
 		return nil, out, nil
 	})
