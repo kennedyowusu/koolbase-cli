@@ -21,7 +21,9 @@ func (s *Server) registerTools() {
 	s.addListProjects()
 	s.addGetProject()
 	s.addDescribeProject()
+	s.addGetCollection()
 	s.addListEnvironments()
+	s.addGetCollection()
 	s.addListFlags()
 	s.addSetFlag()
 	s.addListConfigs()
@@ -882,6 +884,60 @@ func projectSnapshot(raw []byte, fetch fetchConstraints) (describeProjectOut, er
 		})
 	}
 	return out, nil
+}
+
+// --- get_collection (drill-down) --------------------------------------------
+
+type getCollectionIn struct {
+	ProjectID  string `json:"project_id" jsonschema:"UUID of the project the collection belongs to"`
+	Collection string `json:"collection" jsonschema:"the collection's name, as returned by koolbase_describe_project"`
+}
+
+type getCollectionOut struct {
+	ProjectID  string        `json:"project_id"`
+	Collection collectionOut `json:"collection"`
+}
+
+// addGetCollection registers the per-collection drill-down, so work on one
+// screen does not drag the whole project into the agent's context. Same
+// projection as describe_project — the two tools cannot disagree about what a
+// collection looks like because they share one.
+func (s *Server) addGetCollection() {
+	mcp.AddTool(s.mcp, &mcp.Tool{
+		Name: "koolbase_get_collection",
+		Description: strings.TrimSpace(`
+Fetch ONE collection's access rules and unique constraints, by name. Use this
+instead of koolbase_describe_project when working on a single screen or
+feature, so the full project description does not consume context.
+
+The result has the same shape and semantics as one entry of
+koolbase_describe_project's collections array — see that tool's description
+for the rule-kind vocabulary and the schemaless model.`),
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in getCollectionIn) (*mcp.CallToolResult, getCollectionOut, error) {
+		raw, err := s.client.SnapshotPull(in.ProjectID)
+		if err != nil {
+			return nil, getCollectionOut{}, mapScopeErr(err)
+		}
+		out, err := projectSnapshot(raw, func(collection string) ([]api.UniqueConstraint, error) {
+			// Only the requested collection's constraints are worth a fetch.
+			if collection != in.Collection {
+				return nil, nil
+			}
+			return s.client.ListUniqueConstraints(in.ProjectID, collection)
+		})
+		if err != nil {
+			return nil, getCollectionOut{}, mapScopeErr(err)
+		}
+		names := make([]string, 0, len(out.Collections))
+		for _, c := range out.Collections {
+			if c.Name == in.Collection {
+				return nil, getCollectionOut{ProjectID: out.ProjectID, Collection: c}, nil
+			}
+			names = append(names, c.Name)
+		}
+		return nil, getCollectionOut{}, fmt.Errorf("collection %q not found in project %s — existing collections: %s",
+			in.Collection, in.ProjectID, strings.Join(names, ", "))
+	})
 }
 
 // describeProjectIn is the tool's input.
