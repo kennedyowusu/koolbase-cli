@@ -47,6 +47,16 @@ const snapshotWithEverything = `{
       "rule_mode": "",
       "rule_conditions": null,
       "append_only": false
+    },
+    {
+      "name": "drafts",
+      "read_rule": "owner",
+      "write_rule": "owner",
+      "delete_rule": "owner",
+      "owner_field": null,
+      "rule_mode": "",
+      "rule_conditions": null,
+      "append_only": false
     }
   ],
   "environments": [{"name":"Development","slug":"dev","internal_note":"leak-canary"}],
@@ -129,28 +139,29 @@ func TestProjectSnapshot_IgnoresUnknownUpstreamFields(t *testing.T) {
 }
 
 // Rules must arrive as data, with each kind carrying exactly its own
-// satellites: owner_field only on scoped, mode/conditions only on conditional.
-// An agent reading `{"kind":"scoped","owner_field":"created_by"}` has no room
-// to generate an unscoped write.
+// satellites and nothing else. An agent reading
+// {"kind":"scoped","owner_field":"user_id","caller_key":"id"} has no room to
+// generate an unscoped write.
 func TestProjectSnapshot_RulesAsDataPerKind(t *testing.T) {
 	out, _ := mustProject(t, snapshotWithEverything)
 
-	if len(out.Collections) != 3 {
-		t.Fatalf("expected 3 collections, got %d", len(out.Collections))
+	if len(out.Collections) != 4 {
+		t.Fatalf("expected 4 collections, got %d", len(out.Collections))
 	}
 
 	expenses := out.Collections[0]
 	if expenses.Read.Kind != "authenticated" {
 		t.Fatalf("expenses read kind: want authenticated, got %q", expenses.Read.Kind)
 	}
-	if expenses.Read.OwnerField != nil {
-		t.Fatalf("owner_field must not ride on a non-scoped rule, got %q", *expenses.Read.OwnerField)
+	if expenses.Read.OwnerField != "" || expenses.Read.CallerKey != "" {
+		t.Fatalf("ownership fields must not ride on an authenticated rule: %+v", expenses.Read)
 	}
 	if expenses.Write.Kind != "scoped" {
 		t.Fatalf("expenses write kind: want scoped, got %q", expenses.Write.Kind)
 	}
-	if expenses.Write.OwnerField == nil || *expenses.Write.OwnerField != "created_by" {
-		t.Fatalf("scoped write must carry owner_field=created_by, got %v", expenses.Write.OwnerField)
+	if expenses.Write.OwnerField != "created_by" || expenses.Write.CallerKey != "created_by" {
+		t.Fatalf("bare owner_field spec must bind same-name (legacy form), got owner_field=%q caller_key=%q",
+			expenses.Write.OwnerField, expenses.Write.CallerKey)
 	}
 	if expenses.Delete.Kind != "server_only" {
 		t.Fatalf("expenses delete kind: want server_only, got %q", expenses.Delete.Kind)
@@ -175,6 +186,83 @@ func TestProjectSnapshot_RulesAsDataPerKind(t *testing.T) {
 
 	if out.Collections[2].Read.Kind != "public" {
 		t.Fatalf("announcements read kind: want public, got %q", out.Collections[2].Read.Kind)
+	}
+
+	// kind=owner: ownership is the server-stamped created_by against the
+	// caller's id. The collection declares no owner_field, so a projection
+	// that merely passed the column through would leave an agent unable to
+	// tell what establishes ownership — the production gap this test guards.
+	drafts := out.Collections[3]
+	if drafts.Read.Kind != "owner" {
+		t.Fatalf("drafts read kind: want owner, got %q", drafts.Read.Kind)
+	}
+	if drafts.Read.OwnerField != "created_by" || drafts.Read.CallerKey != "id" {
+		t.Fatalf("owner rule must resolve to created_by/id, got owner_field=%q caller_key=%q",
+			drafts.Read.OwnerField, drafts.Read.CallerKey)
+	}
+}
+
+// The $caller binding is a BINDING, not a field name. "user_id=$caller.id"
+// means record.user_id == caller.id, and must be split accordingly — emitting
+// the raw spec would have an agent write a field literally named
+// "user_id=$caller.id". Mirrors the server's parseOwnerField exactly.
+func TestProjectSnapshot_ScopedOwnerFieldBindingIsSplit(t *testing.T) {
+	_, encoded := mustProject(t, `{
+      "source_project_id": "p1",
+      "collections": [{
+        "name": "conversation_members",
+        "read_rule": "scoped", "write_rule": "authenticated", "delete_rule": "owner",
+        "owner_field": "user_id=$caller.id",
+        "rule_mode": "", "rule_conditions": null, "append_only": false
+      }]
+    }`)
+
+	if strings.Contains(encoded, `$caller`) {
+		t.Fatalf("raw owner_field binding leaked into agent-facing output:\n%s", encoded)
+	}
+	if !strings.Contains(encoded, `"owner_field":"user_id"`) {
+		t.Fatalf("expected owner_field split to the record field user_id:\n%s", encoded)
+	}
+	if !strings.Contains(encoded, `"caller_key":"id"`) {
+		t.Fatalf("expected caller_key split to id:\n%s", encoded)
+	}
+}
+
+// Every rule kind the platform defines must map. A kind this projection does
+// not understand must fail loudly rather than emit a bare {"kind":"..."} an
+// agent cannot act on — which is exactly how `owner` reached production output
+// unmapped. Guards the next kind the platform adds.
+func TestProjectSnapshot_EveryPlatformRuleKindMaps(t *testing.T) {
+	// The vocabulary as the server declares it (internal/database/service.go).
+	for _, kind := range []string{"public", "authenticated", "owner", "scoped", "conditional", "server_only"} {
+		ownerField := "null"
+		if kind == "scoped" {
+			ownerField = `"user_id=$caller.id"`
+		}
+		raw := `{"source_project_id":"p1","collections":[{
+          "name":"c","read_rule":"` + kind + `","write_rule":"` + kind + `","delete_rule":"` + kind + `",
+          "owner_field":` + ownerField + `,"rule_mode":"all","rule_conditions":[],"append_only":false}]}`
+
+		out, err := projectSnapshot([]byte(raw))
+		if err != nil {
+			t.Fatalf("rule kind %q failed to project: %v", kind, err)
+		}
+		if got := out.Collections[0].Read.Kind; got != kind {
+			t.Fatalf("rule kind %q projected as %q", kind, got)
+		}
+	}
+
+	// Negative control: an unrecognized kind must be an error, not a silent
+	// passthrough. Without this, the test above would pass for a projection
+	// that emitted any string it was handed.
+	_, err := projectSnapshot([]byte(`{"source_project_id":"p1","collections":[{
+      "name":"c","read_rule":"telepathy","write_rule":"owner","delete_rule":"owner",
+      "owner_field":null,"rule_mode":"","rule_conditions":null,"append_only":false}]}`))
+	if err == nil {
+		t.Fatal("unknown rule kind projected silently; it must fail loudly")
+	}
+	if !strings.Contains(err.Error(), "telepathy") {
+		t.Fatalf("error should name the unknown kind, got: %v", err)
 	}
 }
 

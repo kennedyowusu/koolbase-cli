@@ -619,15 +619,27 @@ func (s *Server) addRecallPatch() {
 
 // accessRule is a collection's rule for one verb, as DATA rather than prose.
 //
-// An agent handed {"kind":"scoped","owner_field":"created_by"} cannot justify
-// generating an unscoped write. An agent handed "remember to scope writes"
-// absolutely will. Every rule kind the platform has gets a representation here.
+// An agent handed {"kind":"scoped","owner_field":"user_id","caller_key":"id"}
+// cannot justify generating an unscoped write. An agent handed "remember to
+// scope writes" absolutely will. Every rule kind the platform has gets a
+// representation here — see ruleFor, which fails loudly on an unknown kind
+// rather than emitting a bare one an agent cannot act on.
 type accessRule struct {
-	Kind string `json:"kind" jsonschema:"one of: public, authenticated, server_only, scoped, conditional"`
-	// OwnerField is set only for kind=scoped: the field holding the owning
-	// user's id. Generated writes MUST populate it and generated reads MUST
-	// filter on it.
-	OwnerField *string `json:"owner_field,omitempty" jsonschema:"for kind=scoped: the field carrying the owning user id"`
+	Kind string `json:"kind" jsonschema:"one of: public, authenticated, owner, scoped, conditional, server_only"`
+
+	// OwnerField and CallerKey are the two halves of an ownership check, set
+	// for kind=owner and kind=scoped. The record's OwnerField must equal the
+	// signed-in caller's CallerKey.
+	//
+	// For kind=owner these are always created_by/id: the server stamps
+	// created_by on insert and the client neither sets nor can override it.
+	// For kind=scoped they come from the collection's owner_field spec, which
+	// is a BINDING, not a field name: "user_id=$caller.id" binds the record's
+	// user_id to the caller's id, and bare "user_id" is the legacy same-name
+	// form binding record.user_id to context user_id.
+	OwnerField string `json:"owner_field,omitempty" jsonschema:"the RECORD field carrying ownership — filter reads on it, populate writes with it (except kind=owner, where the server stamps it)"`
+	CallerKey  string `json:"caller_key,omitempty" jsonschema:"the signed-in caller's property that owner_field must equal, e.g. id"`
+
 	// Mode and Conditions are set only for kind=conditional.
 	Mode       string          `json:"mode,omitempty" jsonschema:"for kind=conditional: how conditions combine"`
 	Conditions json.RawMessage `json:"conditions,omitempty" jsonschema:"for kind=conditional: the rule conditions, as declared"`
@@ -723,22 +735,53 @@ type snapshotShape struct {
 	} `json:"functions"`
 }
 
+// parseOwnerFieldSpec splits an owner_field spec into the record field and the
+// caller-context key it binds against. This mirrors the server's own
+// parseOwnerField (internal/database/service.go) deliberately and exactly: a
+// second dialect here would mean the agent and the enforcement path disagree
+// about what a rule says.
+func parseOwnerFieldSpec(spec string) (recordField, callerKey string) {
+	const marker = "=$caller."
+	if i := strings.Index(spec, marker); i >= 0 {
+		return spec[:i], spec[i+len(marker):]
+	}
+	return spec, spec
+}
+
 // ruleFor shapes one rule string plus its satellite columns into structured
-// data. owner_field rides only with `scoped`, and mode/conditions only with
-// `conditional`, so the output never suggests a field is meaningful where the
-// platform ignores it.
-func ruleFor(kind string, ownerField *string, mode string, conditions json.RawMessage) accessRule {
+// data, so each kind carries exactly the fields that are meaningful for it.
+//
+// An unknown kind returns an error rather than a bare {"kind":"..."}: a kind
+// this function does not understand is one whose ownership semantics the agent
+// cannot act on, and emitting it silently is how `owner` reached production
+// output unmapped. Fail loudly instead.
+func ruleFor(kind string, ownerField *string, mode string, conditions json.RawMessage) (accessRule, error) {
 	r := accessRule{Kind: kind}
 	switch kind {
+	case "public", "authenticated", "server_only":
+		// No satellites: these are decided by authentication state alone.
+	case "owner":
+		// Ownership is the record's server-stamped created_by, compared to the
+		// caller's id. There is no per-collection owner_field for this kind.
+		r.OwnerField = "created_by"
+		r.CallerKey = "id"
 	case "scoped":
-		r.OwnerField = ownerField
+		if ownerField == nil || *ownerField == "" {
+			// The server fails closed on this (denyAllFilter); say so rather
+			// than describing a rule that admits nothing as if it admits
+			// something.
+			return accessRule{}, fmt.Errorf("collection has rule kind %q but no owner_field; the server denies all access to it", kind)
+		}
+		r.OwnerField, r.CallerKey = parseOwnerFieldSpec(*ownerField)
 	case "conditional":
 		r.Mode = mode
 		if len(conditions) > 0 && string(conditions) != "null" {
 			r.Conditions = conditions
 		}
+	default:
+		return accessRule{}, fmt.Errorf("unknown access rule kind %q — the platform's rule vocabulary has grown and koolbase_describe_project has not been updated", kind)
 	}
-	return r
+	return r, nil
 }
 
 // projectSnapshot converts a raw snapshot payload into the agent-facing
@@ -765,11 +808,23 @@ func projectSnapshot(raw []byte) (describeProjectOut, error) {
 	}
 
 	for _, c := range snap.Collections {
+		read, err := ruleFor(c.ReadRule, c.OwnerField, c.RuleMode, c.RuleConditions)
+		if err != nil {
+			return describeProjectOut{}, fmt.Errorf("collection %q read rule: %w", c.Name, err)
+		}
+		write, err := ruleFor(c.WriteRule, c.OwnerField, c.RuleMode, c.RuleConditions)
+		if err != nil {
+			return describeProjectOut{}, fmt.Errorf("collection %q write rule: %w", c.Name, err)
+		}
+		del, err := ruleFor(c.DeleteRule, c.OwnerField, c.RuleMode, c.RuleConditions)
+		if err != nil {
+			return describeProjectOut{}, fmt.Errorf("collection %q delete rule: %w", c.Name, err)
+		}
 		out.Collections = append(out.Collections, collectionOut{
 			Name:       c.Name,
-			Read:       ruleFor(c.ReadRule, c.OwnerField, c.RuleMode, c.RuleConditions),
-			Write:      ruleFor(c.WriteRule, c.OwnerField, c.RuleMode, c.RuleConditions),
-			Delete:     ruleFor(c.DeleteRule, c.OwnerField, c.RuleMode, c.RuleConditions),
+			Read:       read,
+			Write:      write,
+			Delete:     del,
 			AppendOnly: c.AppendOnly,
 		})
 	}
