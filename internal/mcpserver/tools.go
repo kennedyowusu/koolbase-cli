@@ -645,18 +645,32 @@ type accessRule struct {
 	Conditions json.RawMessage `json:"conditions,omitempty" jsonschema:"for kind=conditional: the rule conditions, as declared"`
 }
 
+// uniqueConstraintOut is one declared uniqueness rule. Generated writes MUST
+// NOT create a second record sharing these field values.
+type uniqueConstraintOut struct {
+	Fields          []string `json:"fields" jsonschema:"the field combination that must be unique across the collection"`
+	CaseInsensitive bool     `json:"case_insensitive"`
+}
+
 // collectionOut is one collection's name and governance.
 //
-// Deliberately carries NO field list. Koolbase collections are schemaless:
-// db_collections stores a name and rules, nothing more. Emitting a typed field
-// list would mean inventing one, and a hallucinated schema is worse than an
-// absent one — the developer's first experience would be debugging.
+// Deliberately carries NO general field list. Koolbase collections are
+// schemaless: db_collections stores a name and rules, nothing more. Emitting a
+// typed field list would mean inventing one, and a hallucinated schema is
+// worse than an absent one — the developer's first experience would be
+// debugging. The ONLY declared field names the platform holds are the ones
+// inside unique constraints, which are therefore included.
 type collectionOut struct {
 	Name       string     `json:"name"`
 	Read       accessRule `json:"read"`
 	Write      accessRule `json:"write"`
 	Delete     accessRule `json:"delete"`
 	AppendOnly bool       `json:"append_only" jsonschema:"when true, existing records cannot be updated or deleted"`
+
+	// UniqueConstraints are the collection's declared uniqueness rules — the
+	// only field names the platform holds for a schemaless collection, and
+	// therefore the only ones an agent may treat as known to exist.
+	UniqueConstraints []uniqueConstraintOut `json:"unique_constraints"`
 }
 
 type bucketOut struct {
@@ -784,8 +798,16 @@ func ruleFor(kind string, ownerField *string, mode string, conditions json.RawMe
 	return r, nil
 }
 
+// fetchConstraints returns a collection's declared unique constraints; nil
+// means "do not fetch" (tests, or a future flag). Failures are returned as
+// errors rather than silently emitting a description with constraints absent —
+// absent-but-existing constraints would have an agent generate duplicate
+// writes believing them legal.
+type fetchConstraints func(collection string) ([]api.UniqueConstraint, error)
+
 // projectSnapshot converts a raw snapshot payload into the agent-facing
-// description.
+// description, enriching each collection with its unique constraints via the
+// supplied fetch function.
 //
 // This is an ALLOW-LIST projection, and that is the whole safety property: the
 // output is built field by named field. The snapshot carries function source
@@ -793,7 +815,7 @@ func ruleFor(kind string, ownerField *string, mode string, conditions json.RawMe
 // whatever the server adds next. Passing the payload through — or projecting
 // by deletion rather than construction — would make every future server field
 // an agent-visible one by default.
-func projectSnapshot(raw []byte) (describeProjectOut, error) {
+func projectSnapshot(raw []byte, fetch fetchConstraints) (describeProjectOut, error) {
 	var snap snapshotShape
 	if err := json.Unmarshal(raw, &snap); err != nil {
 		return describeProjectOut{}, fmt.Errorf("failed to parse project snapshot: %w", err)
@@ -820,12 +842,27 @@ func projectSnapshot(raw []byte) (describeProjectOut, error) {
 		if err != nil {
 			return describeProjectOut{}, fmt.Errorf("collection %q delete rule: %w", c.Name, err)
 		}
+
+		constraints := []uniqueConstraintOut{}
+		if fetch != nil {
+			ucs, err := fetch(c.Name)
+			if err != nil {
+				return describeProjectOut{}, fmt.Errorf("collection %q unique constraints: %w", c.Name, err)
+			}
+			for _, uc := range ucs {
+				constraints = append(constraints, uniqueConstraintOut{
+					Fields: uc.Fields, CaseInsensitive: uc.CaseInsensitive,
+				})
+			}
+		}
+
 		out.Collections = append(out.Collections, collectionOut{
-			Name:       c.Name,
-			Read:       read,
-			Write:      write,
-			Delete:     del,
-			AppendOnly: c.AppendOnly,
+			Name:              c.Name,
+			Read:              read,
+			Write:             write,
+			Delete:            del,
+			AppendOnly:        c.AppendOnly,
+			UniqueConstraints: constraints,
 		})
 	}
 	for _, e := range snap.Environments {
@@ -857,28 +894,38 @@ func (s *Server) addDescribeProject() {
 		Name: "koolbase_describe_project",
 		Description: strings.TrimSpace(`
 Describe a Koolbase project's shape so you can write code against it: its
-collections and their access rules, storage buckets, deployed function
-signatures, and environments. Call this BEFORE generating any code that reads
-or writes Koolbase data.
+collections with their access rules and unique constraints, storage buckets,
+deployed function signatures, and environments. Call this BEFORE generating
+any code that reads or writes Koolbase data.
 
 Access rules are returned as structured data, one per verb (read/write/delete).
 Rule kinds:
   public         — anyone, signed in or not
   authenticated  — any signed-in user
-  scoped         — signed-in users, restricted to records they own. The rule
-                   carries owner_field: reads MUST filter on it and writes MUST
-                   populate it with the signed-in user's id.
-  server_only    — only functions and server-side code. Client SDK calls are
-                   refused; do not generate client code for this verb.
+  owner          — only the user who created the record. The server stamps
+                   created_by on insert; client code neither sets nor can
+                   override it. Generated reads should expect other users'
+                   records to be invisible.
+  scoped         — signed-in users, restricted to records they own, via an
+                   explicit binding. The rule carries owner_field (the RECORD
+                   field) and caller_key (the caller property it must equal):
+                   owner_field="user_id", caller_key="id" means reads MUST
+                   filter where user_id equals the signed-in user's id, and
+                   writes MUST populate user_id with it.
   conditional    — allowed when the rule's conditions hold; the rule carries
                    mode and conditions as declared.
+  server_only    — only functions and server-side code. Client SDK calls are
+                   refused; do not generate client code for this verb.
 A collection with append_only=true admits new records but no updates or deletes.
 
 Koolbase collections are SCHEMALESS: a collection is a governed container, and
 records carry whatever fields the application writes. This tool therefore
-returns no field list or field types, because the platform holds none — do not
-infer a fixed schema, and do not invent field names. Every record additionally
-carries $id, $createdAt, $updatedAt and $revision.
+returns no general field list or field types, because the platform holds none —
+do not infer a fixed schema, and do not invent field names. The only declared
+field names are those in unique_constraints: those fields exist by declaration,
+and a write MUST NOT duplicate an existing record's values for any constraint's
+field combination. Every record additionally carries $id, $createdAt,
+$updatedAt and $revision.
 
 Function bodies and secrets are deliberately never returned.`),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in describeProjectIn) (*mcp.CallToolResult, describeProjectOut, error) {
@@ -886,9 +933,11 @@ Function bodies and secrets are deliberately never returned.`),
 		if err != nil {
 			return nil, describeProjectOut{}, mapScopeErr(err)
 		}
-		out, err := projectSnapshot(raw)
+		out, err := projectSnapshot(raw, func(collection string) ([]api.UniqueConstraint, error) {
+			return s.client.ListUniqueConstraints(in.ProjectID, collection)
+		})
 		if err != nil {
-			return nil, describeProjectOut{}, err
+			return nil, describeProjectOut{}, mapScopeErr(err)
 		}
 		return nil, out, nil
 	})

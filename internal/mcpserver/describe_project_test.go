@@ -2,8 +2,11 @@ package mcpserver
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
+
+	"github.com/kennedyowusu/koolbase-cli/internal/api"
 )
 
 // snapshotWithEverything is a snapshot payload carrying every section the
@@ -76,12 +79,13 @@ const snapshotWithEverything = `{
   "crons": [{"name":"nightly","schedule":"0 2 * * *"}]
 }`
 
-// mustProject projects the payload and marshals the result, returning both the
-// struct and its JSON form. Most assertions here are about what appears in the
-// serialized output, since that is what actually reaches an agent.
+// mustProject projects the payload with no constraint fetching and marshals
+// the result, returning both the struct and its JSON form. Most assertions
+// here are about what appears in the serialized output, since that is what
+// actually reaches an agent.
 func mustProject(t *testing.T, raw string) (describeProjectOut, string) {
 	t.Helper()
-	out, err := projectSnapshot([]byte(raw))
+	out, err := projectSnapshot([]byte(raw), nil)
 	if err != nil {
 		t.Fatalf("projectSnapshot returned error: %v", err)
 	}
@@ -243,7 +247,7 @@ func TestProjectSnapshot_EveryPlatformRuleKindMaps(t *testing.T) {
           "name":"c","read_rule":"` + kind + `","write_rule":"` + kind + `","delete_rule":"` + kind + `",
           "owner_field":` + ownerField + `,"rule_mode":"all","rule_conditions":[],"append_only":false}]}`
 
-		out, err := projectSnapshot([]byte(raw))
+		out, err := projectSnapshot([]byte(raw), nil)
 		if err != nil {
 			t.Fatalf("rule kind %q failed to project: %v", kind, err)
 		}
@@ -257,12 +261,79 @@ func TestProjectSnapshot_EveryPlatformRuleKindMaps(t *testing.T) {
 	// that emitted any string it was handed.
 	_, err := projectSnapshot([]byte(`{"source_project_id":"p1","collections":[{
       "name":"c","read_rule":"telepathy","write_rule":"owner","delete_rule":"owner",
-      "owner_field":null,"rule_mode":"","rule_conditions":null,"append_only":false}]}`))
+      "owner_field":null,"rule_mode":"","rule_conditions":null,"append_only":false}]}`), nil)
 	if err == nil {
 		t.Fatal("unknown rule kind projected silently; it must fail loudly")
 	}
 	if !strings.Contains(err.Error(), "telepathy") {
 		t.Fatalf("error should name the unknown kind, got: %v", err)
+	}
+}
+
+// Unique constraints are the ONLY declared field names a schemaless platform
+// holds, so they must reach the agent — projected down to fields and
+// case-sensitivity, with constraint/collection/project IDs (agent-useless)
+// dropped by the same allow-list discipline as everything else.
+func TestProjectSnapshot_AttachesUniqueConstraints(t *testing.T) {
+	fetched := []string{}
+	fetch := func(collection string) ([]api.UniqueConstraint, error) {
+		fetched = append(fetched, collection)
+		if collection == "expenses" {
+			return []api.UniqueConstraint{{
+				ID: "uc-1", ProjectID: "p1", CollectionID: "col-1",
+				Fields: []string{"title", "period"}, CaseInsensitive: true,
+				CreatedAt: "2026-08-04T00:00:00Z",
+			}}, nil
+		}
+		return nil, nil
+	}
+
+	out, err := projectSnapshot([]byte(snapshotWithEverything), fetch)
+	if err != nil {
+		t.Fatalf("projectSnapshot returned error: %v", err)
+	}
+	if len(fetched) != 4 {
+		t.Fatalf("expected constraints fetched for all 4 collections, got %v", fetched)
+	}
+
+	expenses := out.Collections[0]
+	if len(expenses.UniqueConstraints) != 1 {
+		t.Fatalf("expected 1 constraint on expenses, got %d", len(expenses.UniqueConstraints))
+	}
+	uc := expenses.UniqueConstraints[0]
+	if len(uc.Fields) != 2 || uc.Fields[0] != "title" || uc.Fields[1] != "period" || !uc.CaseInsensitive {
+		t.Fatalf("constraint not preserved: %+v", uc)
+	}
+
+	// IDs are noise to an agent and must not survive the projection.
+	encoded, _ := json.Marshal(out)
+	for _, forbidden := range []string{"uc-1", "col-1", `"collection_id"`, `"project_id":"p1"`} {
+		if strings.Contains(string(encoded), forbidden) {
+			t.Fatalf("constraint internals leaked into agent-facing output: %q in\n%s", forbidden, encoded)
+		}
+	}
+
+	// A collection with no constraints serializes [] not null, so an agent
+	// distinguishes "none declared" from "unknown".
+	if !strings.Contains(string(encoded), `"unique_constraints":[]`) {
+		t.Fatalf("constraint-less collections must carry an empty array:\n%s", encoded)
+	}
+}
+
+// A failed constraint fetch must fail the whole description. Silently
+// emitting a description with constraints absent would have an agent generate
+// duplicate writes believing them legal — absent-but-existing is worse than
+// an error the agent can see.
+func TestProjectSnapshot_ConstraintFetchFailureFailsLoudly(t *testing.T) {
+	fetch := func(collection string) ([]api.UniqueConstraint, error) {
+		return nil, errors.New("boom")
+	}
+	_, err := projectSnapshot([]byte(snapshotWithEverything), fetch)
+	if err == nil {
+		t.Fatal("constraint fetch failure was swallowed; it must fail the projection")
+	}
+	if !strings.Contains(err.Error(), "boom") || !strings.Contains(err.Error(), "expenses") {
+		t.Fatalf("error should carry the cause and name the collection, got: %v", err)
 	}
 }
 
