@@ -1098,6 +1098,36 @@ Offline surface:
 Flags and config:
     Koolbase.isEnabled('flag_key');               // bool, sync
     Koolbase.configString('key', fallback: '');
+
+BEHAVIORAL WIDGETS — prefer these over hand-writing the same behavior.
+The SDK ships components that encode the semantics above correctly; using
+them means three correct lines instead of thirty plausible ones:
+
+    KoolbaseAuthGate(                              // auth branching, done right
+      signedIn: (context, user) => HomeScreen(),
+      signedOut: (context) => LoginScreen(),
+      // restoring: optional slot; defaults to a spinner. The gate calls
+      // restoreSession() once at mount, so returning users never see a
+      // login flash. RestoreResult.offline counts as signed IN.
+    )
+    // Descendants read auth state without statics, rebuilding on change:
+    KoolbaseAuthScope.of(context).user             // KoolbaseUser?
+    KoolbaseAuthScope.of(context).restoredOffline  // offline-restore banner
+
+    KoolbaseCollectionList(                        // SWR list, done right
+      collection: 'expenses',
+      query: (q) => q.where('user_id', isEqualTo: user.id)
+                     .orderBy('created_at', descending: true),
+      itemBuilder: (context, record) => ExpenseTile(record),
+      // empty / error / loading: optional slots. Owns ListView +
+      // pull-to-refresh; handles both SWR arrivals and keeps stale
+      // records over a failed refresh.
+    )
+    // The query callback runs for EVERY fetch with a FRESH query and must
+    // be deterministic — never retain or reuse a query instance
+    // (KoolbaseQuery mutates, and stream identity derives from filters).
+    // For custom scroll layouts, drive KoolbaseCollectionController
+    // directly; it owns the fetch/stream lifecycle widget-free.
 `
 
 const sdkReactNativeConventions = `
