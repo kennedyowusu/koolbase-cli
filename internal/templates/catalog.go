@@ -88,6 +88,12 @@ type Entry struct {
 	SHA256    string `json:"sha256"`
 	Signature string `json:"signature"`
 
+	// SigningKeyID names which template-signing key produced Signature, so a
+	// new key can ship in a CLI release and sit unused until the publisher
+	// switches. Without it, rotation is a flag day: every CLI must update
+	// before the publisher can change keys.
+	SigningKeyID string `json:"signing_key_id"`
+
 	// Deprecated marks a version that should not be chosen automatically but
 	// remains resolvable when pinned — withdrawing a version must not break
 	// a build that named it.
