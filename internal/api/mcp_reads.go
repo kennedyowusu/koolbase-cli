@@ -40,6 +40,13 @@ type Environment struct {
 	ProjectID string `json:"project_id"`
 	Name      string `json:"name"`
 	Slug      string `json:"slug"`
+
+	// PublicKey is the pk_live_ key a client app initializes with — needed by
+	// `koolbase create` to write a working config. The secret key is NOT here
+	// and must never be added: the API stopped returning it (hatchway-api
+	// 7ea896b) precisely because every caller who could read a project was
+	// receiving every environment credential.
+	PublicKey string `json:"public_key"`
 }
 
 // ListEnvironments returns the environments of a project. Needed so an agent
