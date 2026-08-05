@@ -1,0 +1,70 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:koolbase_flutter/koolbase_flutter.dart';
+
+import '../../application/auth_controller.dart';
+import 'login_screen.dart';
+
+/// The app's entry screen.
+///
+/// KoolbaseAuthGate does the branching: it restores a persisted session at
+/// mount (so a returning user never sees a login flash), follows auth state
+/// changes, and treats an offline restore as signed in.
+class HomeScreen extends StatelessWidget {
+  const HomeScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return KoolbaseAuthGate(
+      signedOut: (context) => const LoginScreen(),
+      signedIn: (context, user) => _SignedInHome(user: user),
+    );
+  }
+}
+
+class _SignedInHome extends ConsumerWidget {
+  const _SignedInHome({required this.user});
+
+  final KoolbaseUser user;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('{% .AppTitle %}'),
+        actions: [
+          IconButton(
+            tooltip: 'Sign out',
+            icon: const Icon(Icons.logout),
+            onPressed: () => ref.read(authControllerProvider.notifier).signOut(),
+          ),
+        ],
+      ),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.check_circle_outline,
+                  size: 56, color: theme.colorScheme.primary),
+              const SizedBox(height: 16),
+              Text('You are signed in', style: theme.textTheme.headlineSmall),
+              const SizedBox(height: 8),
+              Text(user.email, style: theme.textTheme.bodyMedium),
+              const SizedBox(height: 32),
+              Text(
+                'This screen is a starting point. Add a feature with '
+                '`koolbase add <feature>`, or start building — the code is yours.',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodySmall,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

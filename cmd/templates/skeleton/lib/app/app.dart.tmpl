@@ -1,0 +1,23 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../core/theme/app_theme.dart';
+import 'router.dart';
+
+/// The application shell: theme and router, nothing else.
+class {% .AppClass %}App extends ConsumerWidget {
+  const {% .AppClass %}App({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final router = ref.watch(routerProvider);
+
+    return MaterialApp.router(
+      title: '{% .AppTitle %}',
+      debugShowCheckedModeBanner: false,
+      theme: AppTheme.light,
+      darkTheme: AppTheme.dark,
+      routerConfig: router,
+    );
+  }
+}

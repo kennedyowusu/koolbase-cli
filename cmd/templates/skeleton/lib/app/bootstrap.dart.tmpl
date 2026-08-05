@@ -1,0 +1,26 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:koolbase_flutter/koolbase_flutter.dart';
+
+import 'app.dart';
+import 'koolbase_config.dart';
+
+/// Starts the app: initialise Koolbase once, then run inside a ProviderScope.
+///
+/// Initialisation happens BEFORE runApp so the first frame already knows
+/// whether a session exists — no flash of signed-out UI while the SDK wakes
+/// up. KoolbaseAuthGate handles the rest.
+Future<void> bootstrap() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  await Koolbase.initialize(
+    KoolbaseConfig(
+      publicKey: KoolbaseEnv.publicKey,
+      baseUrl: KoolbaseEnv.baseUrl,
+    ),
+  );
+
+  runApp(const ProviderScope(child: {% .AppClass %}App()));
+}

@@ -28,6 +28,8 @@ import (
 type Vars struct {
 	// AppName is the Dart package name: lowercase, underscores.
 	AppName string
+	// AppClass is the PascalCase form used for Dart class names.
+	AppClass string
 	// AppTitle is the human-facing name shown in the UI.
 	AppTitle string
 	// OrgIdentifier is the reverse-domain prefix, e.g. "com.example".

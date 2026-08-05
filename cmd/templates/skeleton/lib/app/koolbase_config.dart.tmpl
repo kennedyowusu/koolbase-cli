@@ -1,0 +1,17 @@
+/// Connection details for the Koolbase project this app was scaffolded
+/// against.
+///
+/// The public key is safe to ship in a client binary — it identifies the
+/// environment, and every request is still authorised server-side by your
+/// collection access rules. The SECRET key is not here and must never be:
+/// it belongs to server-side code only.
+class KoolbaseEnv {
+  const KoolbaseEnv._();
+
+  static const projectId = '{% .ProjectID %}';
+  static const publicKey = '{% .PublicKey %}';
+  static const baseUrl = '{% .BaseURL %}';
+
+  /// The environment this build talks to.
+  static const environment = '{% .EnvironmentSlug %}';
+}

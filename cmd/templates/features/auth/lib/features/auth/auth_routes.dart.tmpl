@@ -1,0 +1,19 @@
+import 'package:go_router/go_router.dart';
+
+import 'presentation/screens/forgot_password_screen.dart';
+import 'presentation/screens/register_screen.dart';
+
+/// Routes this feature contributes. Spread into the app router — that is how
+/// a feature adds screens without anyone editing router.dart by hand.
+final authRoutes = <RouteBase>[
+  GoRoute(
+    path: '/register',
+    name: 'register',
+    builder: (context, state) => const RegisterScreen(),
+  ),
+  GoRoute(
+    path: '/forgot-password',
+    name: 'forgot-password',
+    builder: (context, state) => const ForgotPasswordScreen(),
+  ),
+];

@@ -1,0 +1,41 @@
+import 'package:flutter/material.dart';
+
+/// A text field with the app's shared styling. Shared PRESENTATION only —
+/// anything that encodes Koolbase behaviour belongs in the SDK's widgets, not
+/// here.
+class AppTextField extends StatelessWidget {
+  const AppTextField({
+    super.key,
+    required this.controller,
+    required this.label,
+    this.obscureText = false,
+    this.keyboardType,
+    this.textInputAction,
+    this.autofillHints,
+    this.validator,
+  });
+
+  final TextEditingController controller;
+  final String label;
+  final bool obscureText;
+  final TextInputType? keyboardType;
+  final TextInputAction? textInputAction;
+  final Iterable<String>? autofillHints;
+  final String? Function(String?)? validator;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextFormField(
+      controller: controller,
+      obscureText: obscureText,
+      keyboardType: keyboardType,
+      textInputAction: textInputAction,
+      autofillHints: autofillHints,
+      validator: validator,
+      decoration: InputDecoration(
+        labelText: label,
+        border: const OutlineInputBorder(),
+      ),
+    );
+  }
+}

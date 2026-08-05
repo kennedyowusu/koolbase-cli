@@ -1,0 +1,25 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+
+import '../features/auth/presentation/screens/home_screen.dart';
+import '../features/auth/auth_routes.dart';
+
+/// The app's routes.
+///
+/// Each feature contributes its own routes from a `<feature>_routes.dart`
+/// file and they are spread in here — so adding a feature is one import and
+/// one spread, never a rewrite of this file.
+final routerProvider = Provider<GoRouter>((ref) {
+  return GoRouter(
+    initialLocation: '/',
+    routes: [
+      GoRoute(
+        path: '/',
+        name: 'home',
+        builder: (context, state) => const HomeScreen(),
+      ),
+      ...authRoutes,
+      // koolbase:routes — `koolbase add` reports new feature routes here.
+    ],
+  );
+});

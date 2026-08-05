@@ -1,0 +1,40 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:koolbase_flutter/koolbase_flutter.dart';
+
+/// The only place this feature talks to Koolbase auth.
+///
+/// Keeping SDK calls behind a repository is what makes the feature testable
+/// and what keeps an SDK change a one-file edit rather than a hunt through
+/// widgets.
+class AuthRepository {
+  const AuthRepository();
+
+  Future<KoolbaseUser> signIn({
+    required String email,
+    required String password,
+  }) {
+    return Koolbase.auth.login(email: email, password: password);
+  }
+
+  Future<KoolbaseUser> register({
+    required String email,
+    required String password,
+    String? fullName,
+  }) {
+    return Koolbase.auth.signUp(
+      email: email,
+      password: password,
+      fullName: fullName,
+    );
+  }
+
+  Future<void> sendPasswordReset(String email) {
+    return Koolbase.auth.forgotPassword(email: email);
+  }
+
+  Future<void> signOut() => Koolbase.auth.logout();
+}
+
+final authRepositoryProvider = Provider<AuthRepository>((ref) {
+  return const AuthRepository();
+});

@@ -1,0 +1,60 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../data/repositories/auth_repository.dart';
+
+/// Drives the auth screens: submits credentials, exposes busy/error state.
+///
+/// The signed-in USER comes from `authStateProvider` (core/koolbase), not
+/// from here — this controller owns the act of signing in, not the session.
+class AuthController extends AsyncNotifier<void> {
+  @override
+  Future<void> build() async {}
+
+  AuthRepository get _repo => ref.read(authRepositoryProvider);
+
+  Future<bool> signIn({required String email, required String password}) async {
+    state = const AsyncValue.loading();
+    final result = await AsyncValue.guard(
+      () => _repo.signIn(email: email, password: password),
+    );
+    state = result.hasError
+        ? AsyncValue.error(result.error!, result.stackTrace!)
+        : const AsyncValue.data(null);
+    return !result.hasError;
+  }
+
+  Future<bool> register({
+    required String email,
+    required String password,
+    String? fullName,
+  }) async {
+    state = const AsyncValue.loading();
+    final result = await AsyncValue.guard(
+      () => _repo.register(email: email, password: password, fullName: fullName),
+    );
+    state = result.hasError
+        ? AsyncValue.error(result.error!, result.stackTrace!)
+        : const AsyncValue.data(null);
+    return !result.hasError;
+  }
+
+  Future<bool> sendPasswordReset(String email) async {
+    state = const AsyncValue.loading();
+    final result = await AsyncValue.guard(() => _repo.sendPasswordReset(email));
+    state = result.hasError
+        ? AsyncValue.error(result.error!, result.stackTrace!)
+        : const AsyncValue.data(null);
+    return !result.hasError;
+  }
+
+  Future<void> signOut() async {
+    state = const AsyncValue.loading();
+    final result = await AsyncValue.guard(_repo.signOut);
+    state = result.hasError
+        ? AsyncValue.error(result.error!, result.stackTrace!)
+        : const AsyncValue.data(null);
+  }
+}
+
+final authControllerProvider =
+    AsyncNotifierProvider<AuthController, void>(AuthController.new);

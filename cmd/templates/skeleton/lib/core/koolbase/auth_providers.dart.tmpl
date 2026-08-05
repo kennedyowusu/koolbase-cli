@@ -1,0 +1,18 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:koolbase_flutter/koolbase_flutter.dart';
+
+/// The signed-in user, as a stream.
+///
+/// Seeded synchronously from the SDK's current user because the auth stream
+/// is a broadcast with no replay — a listen-only provider would sit empty
+/// until the next sign-in or sign-out.
+final authStateProvider = StreamProvider<KoolbaseUser?>((ref) async* {
+  yield Koolbase.auth.currentUser;
+  yield* Koolbase.auth.authStateChanges;
+});
+
+/// The current user, or null. Convenience for widgets that only need the
+/// value and not the loading/error states.
+final currentUserProvider = Provider<KoolbaseUser?>((ref) {
+  return ref.watch(authStateProvider).value;
+});

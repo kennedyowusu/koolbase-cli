@@ -31,6 +31,11 @@ type Client struct {
 // and failing fast is correct. If max execution changes, change this too.
 const invokeTimeout = 60 * time.Second
 
+// BaseURL reports the API this client talks to. Needed by `koolbase create`,
+// which writes it into the generated app's config so a scaffolded project
+// points at the same API the CLI is using — self-hosted included.
+func (c *Client) BaseURL() string { return c.baseURL }
+
 func NewClient(baseURL, apiKey string) *Client {
 	if baseURL == "" {
 		baseURL = defaultBaseURL

@@ -1,0 +1,33 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:koolbase_flutter/koolbase_flutter.dart';
+
+/// Renders an auth failure in human terms.
+///
+/// Koolbase raises typed exceptions rather than status codes, so a screen can
+/// say what actually went wrong instead of "something failed".
+class AuthErrorText extends StatelessWidget {
+  const AuthErrorText({super.key, required this.state});
+
+  final AsyncValue<void> state;
+
+  @override
+  Widget build(BuildContext context) {
+    final error = state.error;
+    if (error == null) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Text(
+        _message(error),
+        style: TextStyle(color: Theme.of(context).colorScheme.error),
+      ),
+    );
+  }
+
+  String _message(Object error) {
+    if (error is KoolbaseAuthException) return error.message;
+    if (error is KoolbaseException) return error.message;
+    return 'Something went wrong. Please try again.';
+  }
+}
