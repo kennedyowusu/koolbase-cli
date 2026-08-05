@@ -1,3 +1,49 @@
+{% if .Flavors %}
+/// Connection details for the Koolbase project this app was scaffolded
+/// against, one constant per flavor.
+///
+/// The public key is safe to ship in a client binary — it identifies the
+/// environment, and every request is still authorised server-side by your
+/// collection access rules. The SECRET key is not here and must never be:
+/// it belongs to server-side code only.
+///
+/// `bootstrap()` takes the one its entrypoint passes, so which environment a
+/// build talks to is visible in the file you ran.
+class KoolbaseEnv {
+  const KoolbaseEnv({
+    required this.name,
+    required this.projectId,
+    required this.publicKey,
+    required this.baseUrl,
+  });
+
+  final String name;
+  final String projectId;
+  final String publicKey;
+  final String baseUrl;
+
+  static const development = KoolbaseEnv(
+    name: 'development',
+    projectId: '{% .ProjectID %}',
+    publicKey: '{% .DevPublicKey %}',
+    baseUrl: '{% .BaseURL %}',
+  );
+
+  static const staging = KoolbaseEnv(
+    name: 'staging',
+    projectId: '{% .ProjectID %}',
+    publicKey: '{% .StagingPublicKey %}',
+    baseUrl: '{% .BaseURL %}',
+  );
+
+  static const production = KoolbaseEnv(
+    name: 'production',
+    projectId: '{% .ProjectID %}',
+    publicKey: '{% .ProdPublicKey %}',
+    baseUrl: '{% .BaseURL %}',
+  );
+}
+{% else %}
 /// Connection details for the Koolbase project this app was scaffolded
 /// against.
 ///
@@ -15,3 +61,4 @@ class KoolbaseEnv {
   /// The environment this build talks to.
   static const environment = '{% .EnvironmentSlug %}';
 }
+{% end %}

@@ -80,9 +80,22 @@ architecture away; nothing tracks or upgrades it afterwards.`,
 			return err
 		}
 
-		env, err := resolveEnvironment(client, project.ID)
-		if err != nil {
-			return err
+		// Flavors need one environment per flavor and may create them, so
+		// that resolution happens BEFORE flutter create — a cancelled
+		// confirmation must not leave a half-made project on disk.
+		var env *api.Environment
+		var flavors *flavorEnvs
+		if createFlavors {
+			flavors, err = resolveFlavorEnvironments(client, project.ID)
+			if err != nil {
+				return err
+			}
+			env = flavors.dev
+		} else {
+			env, err = resolveEnvironment(client, project.ID)
+			if err != nil {
+				return err
+			}
 		}
 
 		fmt.Printf("\nCreating Flutter app %s…\n", appName)
@@ -117,11 +130,21 @@ architecture away; nothing tracks or upgrades it afterwards.`,
 			Flavors:         createFlavors,
 			SDKVersion:      flutterSDKConstraint,
 		}
+		if createFlavors {
+			vars.DevPublicKey = flavors.dev.PublicKey
+			vars.StagingPublicKey = flavors.staging.PublicKey
+			vars.ProdPublicKey = flavors.prod.PublicKey
+		}
 		if err := scaffold.Render(templatesFS, "templates/skeleton", appName, vars); err != nil {
 			return fmt.Errorf("scaffolding failed: %w", err)
 		}
 		if err := scaffold.Render(templatesFS, "templates/features/auth", appName, vars); err != nil {
 			return fmt.Errorf("scaffolding auth failed: %w", err)
+		}
+		if createFlavors {
+			if err := scaffold.Render(templatesFS, "templates/flavors", appName, vars); err != nil {
+				return fmt.Errorf("scaffolding flavors failed: %w", err)
+			}
 		}
 
 		if !createSkipPub {
@@ -136,18 +159,24 @@ architecture away; nothing tracks or upgrades it afterwards.`,
 			}
 		}
 
-		fmt.Printf(`
-✓ %s is ready.
-
-  Project      %s
-  Environment  %s
+		fmt.Printf("\n✓ %s is ready.\n\n  Project      %s\n", appName, project.Name)
+		if createFlavors {
+			fmt.Printf(`  Flavors      development · staging · production
 
   cd %s
-  flutter run
+  flutter run                                # development
+  flutter run -t lib/main_staging.dart       # staging
+  flutter run -t lib/main_production.dart    # production
 
-Sign-in screens are generated and wired. Add a feature with:
-  koolbase add <feature>
-`, appName, project.Name, env.Slug, appName)
+Dart-side flavors are wired. Platform-side flavors — Android product
+flavors and iOS schemes — are yours to add if you need separate bundle
+identifiers or app icons per environment; the CLI does not edit your
+gradle or Xcode project.
+`, appName)
+		} else {
+			fmt.Printf("  Environment  %s\n\n  cd %s\n  flutter run\n", env.Slug, appName)
+		}
+		fmt.Printf("\nSign-in screens are generated and wired. Add a feature with:\n  koolbase add <feature>\n")
 		return nil
 	},
 }
@@ -246,6 +275,85 @@ func createOrgIdentifier() string {
 		return v
 	}
 	return "com.example"
+}
+
+// flavorEnvs holds the environment each flavor points at.
+type flavorEnvs struct {
+	dev     *api.Environment
+	staging *api.Environment
+	prod    *api.Environment
+}
+
+// resolveFlavorEnvironments ensures the project has an environment for each
+// flavor, creating the missing ones — but only after saying exactly what will
+// be created and getting a yes. Environments count against the developer's
+// plan, and a flag should not quietly spend an allowance.
+func resolveFlavorEnvironments(client *api.Client, projectID string) (*flavorEnvs, error) {
+	existing, err := client.ListEnvironments(projectID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Match on the slugs the CLI creates, plus the short forms people use.
+	find := func(names ...string) *api.Environment {
+		for i := range existing {
+			for _, n := range names {
+				if existing[i].Slug == n {
+					return &existing[i]
+				}
+			}
+		}
+		return nil
+	}
+
+	out := &flavorEnvs{
+		dev:     find("development", "dev"),
+		staging: find("staging", "stage"),
+		prod:    find("production", "prod"),
+	}
+
+	var missing []string
+	if out.dev == nil {
+		missing = append(missing, "development")
+	}
+	if out.staging == nil {
+		missing = append(missing, "staging")
+	}
+	if out.prod == nil {
+		missing = append(missing, "production")
+	}
+	if len(missing) == 0 {
+		return out, nil
+	}
+
+	fmt.Printf("\n--flavors needs one environment per flavor. This project is missing: %s\n",
+		strings.Join(missing, ", "))
+	fmt.Printf("Creating %d environment(s) counts against your plan's limit.\n", len(missing))
+	fmt.Print("Create them now? [Y/n]: ")
+
+	reader := bufio.NewReader(os.Stdin)
+	answer, _ := reader.ReadString('\n')
+	answer = strings.ToLower(strings.TrimSpace(answer))
+	if answer != "" && answer != "y" && answer != "yes" {
+		return nil, fmt.Errorf("cancelled — run without --flavors for a single-environment app")
+	}
+
+	for _, name := range missing {
+		env, err := client.CreateEnvironment(projectID, name)
+		if err != nil {
+			return nil, fmt.Errorf("creating %s: %w", name, err)
+		}
+		fmt.Printf("✓ Created environment %s\n", env.Slug)
+		switch name {
+		case "development":
+			out.dev = env
+		case "staging":
+			out.staging = env
+		case "production":
+			out.prod = env
+		}
+	}
+	return out, nil
 }
 
 // titleFromPackage turns my_cool_app into "My Cool App" for display strings.

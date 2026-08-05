@@ -48,6 +48,11 @@ type Vars struct {
 	// configs rather than a single one.
 	Flavors bool
 
+	// Per-flavor public keys, populated only when Flavors is true.
+	DevPublicKey     string
+	StagingPublicKey string
+	ProdPublicKey    string
+
 	// SDKVersion is the koolbase_flutter constraint written into pubspec.
 	SDKVersion string
 }

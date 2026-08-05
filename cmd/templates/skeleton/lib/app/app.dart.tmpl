@@ -6,7 +6,11 @@ import 'router.dart';
 
 /// The application shell: theme and router, nothing else.
 class {% .AppClass %}App extends ConsumerWidget {
-  const {% .AppClass %}App({super.key});
+  const {% .AppClass %}App({super.key{% if .Flavors %}, required this.environment{% end %}});
+{% if .Flavors %}
+  /// Which flavor this build is running: development, staging, or production.
+  final String environment;
+{% end %}
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

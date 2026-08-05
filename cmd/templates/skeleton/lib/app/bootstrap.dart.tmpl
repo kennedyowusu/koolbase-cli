@@ -12,6 +12,24 @@ import 'koolbase_config.dart';
 /// Initialisation happens BEFORE runApp so the first frame already knows
 /// whether a session exists — no flash of signed-out UI while the SDK wakes
 /// up. KoolbaseAuthGate handles the rest.
+{% if .Flavors %}
+///
+/// The environment comes from the entrypoint you ran: main.dart is
+/// development, main_staging.dart is staging, main_production.dart is
+/// production. Which backend a build talks to is visible in one file.
+Future<void> bootstrap(KoolbaseEnv env) async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  await Koolbase.initialize(
+    KoolbaseConfig(
+      publicKey: env.publicKey,
+      baseUrl: env.baseUrl,
+    ),
+  );
+
+  runApp(ProviderScope(child: {% .AppClass %}App(environment: env.name)));
+}
+{% else %}
 Future<void> bootstrap() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -24,3 +42,4 @@ Future<void> bootstrap() async {
 
   runApp(const ProviderScope(child: {% .AppClass %}App()));
 }
+{% end %}
