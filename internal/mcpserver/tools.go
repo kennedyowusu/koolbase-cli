@@ -1119,9 +1119,14 @@ them means three correct lines instead of thirty plausible ones:
       query: (q) => q.where('user_id', isEqualTo: user.id)
                      .orderBy('created_at', descending: true),
       itemBuilder: (context, record) => ExpenseTile(record),
-      // empty / error / loading: optional slots. Owns ListView +
-      // pull-to-refresh; handles both SWR arrivals and keeps stale
-      // records over a failed refresh.
+      // Optional slots — exact signatures:
+      //   empty:   (BuildContext context) => Widget
+      //   loading: (BuildContext context) => Widget
+      //   error:   (BuildContext context, Object error,
+      //             Future<void> Function() retry) => Widget
+      // Owns ListView + pull-to-refresh; handles both SWR arrivals and
+      // keeps stale records over a failed refresh (error slot only shows
+      // for a FIRST load with nothing to display).
     )
     // The query callback runs for EVERY fetch with a FRESH query and must
     // be deterministic — never retain or reuse a query instance
