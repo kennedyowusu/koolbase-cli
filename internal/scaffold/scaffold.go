@@ -64,6 +64,11 @@ type Vars struct {
 // anything containing {% legitimately, and for binary assets.
 const templateSuffix = ".tmpl"
 
+// cacheMetadataName is written into a cached template directory by the
+// template store (internal/templates). It is bookkeeping, never content, and
+// is skipped when rendering.
+const cacheMetadataName = ".koolbase-template.json"
+
 // Render walks src (an embedded or on-disk filesystem), renders every file
 // against vars, and writes the result under dst.
 //
@@ -93,6 +98,14 @@ func Render(src fs.FS, root string, dst string, vars Vars) error {
 
 		if d.IsDir() {
 			return os.MkdirAll(outPath, 0o755)
+		}
+
+		// Cache bookkeeping is not template content. A fetched template is
+		// rendered from its cache directory, which carries the metadata that
+		// records what was verified — it must not land in the developer's
+		// project.
+		if d.Name() == cacheMetadataName {
+			return nil
 		}
 
 		content, err := fs.ReadFile(src, path)

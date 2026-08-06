@@ -155,6 +155,31 @@ func TestRender_ConditionalOnFlavors(t *testing.T) {
 	}
 }
 
+// The template store writes its bookkeeping into the cache directory a
+// fetched template is rendered from. That file must not reach the
+// developer's project — it did, in every project scaffolded from a fetched
+// template, until `koolbase add` listed it as a collision and made it
+// visible.
+func TestRender_SkipsCacheMetadata(t *testing.T) {
+	src := fstest.MapFS{
+		"tpl/.koolbase-template.json": &fstest.MapFile{Data: []byte(`{"id":"chat"}`)},
+		"tpl/lib/main.dart.tmpl":      &fstest.MapFile{Data: []byte("void main() {}\n")},
+	}
+	dst := t.TempDir()
+
+	if err := Render(src, "tpl", dst, testVars()); err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dst, ".koolbase-template.json")); err == nil {
+		t.Fatal("cache metadata was rendered into the output tree")
+	}
+	// And the real file IS there, so this cannot pass by rendering nothing.
+	if _, err := os.Stat(filepath.Join(dst, "lib/main.dart")); err != nil {
+		t.Fatalf("template content missing: %v", err)
+	}
+}
+
 func readFile(t *testing.T, path string) string {
 	t.Helper()
 	b, err := os.ReadFile(path)

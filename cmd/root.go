@@ -54,4 +54,5 @@ func init() {
 	rootCmd.AddCommand(engineCmd)
 	rootCmd.AddCommand(buildCmd)
 	rootCmd.AddCommand(createCmd)
+	rootCmd.AddCommand(addCmd)
 }
