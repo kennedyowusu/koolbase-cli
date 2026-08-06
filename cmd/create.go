@@ -3,6 +3,7 @@ package cmd
 import (
 	"bufio"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -100,6 +101,19 @@ architecture away; nothing tracks or upgrades it afterwards.`,
 			}
 		}
 
+		// Resolve and verify the template BEFORE flutter create runs. A
+		// failure here — an unknown template, an incompatible version, a
+		// signature that does not verify — must not leave a half-made
+		// project on disk.
+		var templateFS fs.FS
+		var templateEntry *templates.Entry
+		if createTemplate != "" {
+			templateFS, templateEntry, err = resolveTemplate(createTemplate)
+			if err != nil {
+				return err
+			}
+		}
+
 		fmt.Printf("\nCreating Flutter app %s…\n", appName)
 		flutter := exec.Command("flutter", "create",
 			"--org", createOrgIdentifier(),
@@ -152,10 +166,12 @@ architecture away; nothing tracks or upgrades it afterwards.`,
 		// A fetched template layers on top of the embedded base. The default
 		// path never touches the catalog — that is the availability floor:
 		// `koolbase create` must work when template distribution does not.
-		if createTemplate != "" {
-			if err := addCatalogTemplate(appName, createTemplate, vars); err != nil {
-				return err
+		if templateFS != nil {
+			if err := scaffold.Render(templateFS, ".", appName, vars); err != nil {
+				return fmt.Errorf("rendering template %s@%s failed: %w",
+					templateEntry.ID, templateEntry.Version, err)
 			}
+			fmt.Printf("✓ Added %s\n", templateEntry.Title)
 		}
 
 		if !createSkipPub {
@@ -379,24 +395,28 @@ func titleFromPackage(pkg string) string {
 	return strings.Join(parts, " ")
 }
 
-// addCatalogTemplate resolves a template through the catalog and renders it
-// into the new project.
-func addCatalogTemplate(appName, ref string, vars scaffold.Vars) error {
+// resolveTemplate fetches and verifies a template, returning its contents
+// ready to render.
+//
+// Called BEFORE flutter create so a failure — an unknown template, an
+// incompatible version, a signature that does not verify — leaves nothing on
+// disk. Rendering happens later, once the project exists.
+func resolveTemplate(ref string) (fs.FS, *templates.Entry, error) {
 	req, err := templates.ParseRef(ref, templates.Flutter)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 
 	store, err := templates.NewStore()
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	store.SweepStaging()
 
 	fmt.Printf("\nResolving template %s…\n", ref)
 	catalog, err := store.FetchCatalog()
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 
 	entry, err := templates.Resolve(catalog, req, templates.Environment{
@@ -404,19 +424,15 @@ func addCatalogTemplate(appName, ref string, vars scaffold.Vars) error {
 		SDKVersion:     strings.TrimPrefix(flutterSDKConstraint, "^"),
 	})
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	fmt.Printf("    %s@%s\n", entry.ID, entry.Version)
 
 	fsys, err := store.Prepare(*entry)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-	if err := scaffold.Render(fsys, ".", appName, vars); err != nil {
-		return fmt.Errorf("rendering template %s@%s failed: %w", entry.ID, entry.Version, err)
-	}
-	fmt.Printf("✓ Added %s\n", entry.Title)
-	return nil
+	return fsys, entry, nil
 }
 
 // detectFlutterVersion reads the installed Flutter version for constraint
