@@ -12,6 +12,7 @@ import (
 
 	"github.com/kennedyowusu/koolbase-cli/internal/api"
 	"github.com/kennedyowusu/koolbase-cli/internal/scaffold"
+	"github.com/kennedyowusu/koolbase-cli/internal/templates"
 	"github.com/spf13/cobra"
 )
 
@@ -34,6 +35,7 @@ var (
 	createOrg       string
 	createFlavors   bool
 	createSkipPub   bool
+	createTemplate  string
 )
 
 // dartPackageName enforces Dart's package rules: lowercase, digits, and
@@ -144,6 +146,15 @@ architecture away; nothing tracks or upgrades it afterwards.`,
 		if createFlavors {
 			if err := scaffold.Render(templatesFS, "templates/flavors", appName, vars); err != nil {
 				return fmt.Errorf("scaffolding flavors failed: %w", err)
+			}
+		}
+
+		// A fetched template layers on top of the embedded base. The default
+		// path never touches the catalog — that is the availability floor:
+		// `koolbase create` must work when template distribution does not.
+		if createTemplate != "" {
+			if err := addCatalogTemplate(appName, createTemplate, vars); err != nil {
+				return err
 			}
 		}
 
@@ -368,9 +379,68 @@ func titleFromPackage(pkg string) string {
 	return strings.Join(parts, " ")
 }
 
+// addCatalogTemplate resolves a template through the catalog and renders it
+// into the new project.
+func addCatalogTemplate(appName, ref string, vars scaffold.Vars) error {
+	req, err := templates.ParseRef(ref, templates.Flutter)
+	if err != nil {
+		return err
+	}
+
+	store, err := templates.NewStore()
+	if err != nil {
+		return err
+	}
+	store.SweepStaging()
+
+	fmt.Printf("\nResolving template %s…\n", ref)
+	catalog, err := store.FetchCatalog()
+	if err != nil {
+		return err
+	}
+
+	entry, err := templates.Resolve(catalog, req, templates.Environment{
+		FlutterVersion: detectFlutterVersion(),
+		SDKVersion:     strings.TrimPrefix(flutterSDKConstraint, "^"),
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Printf("    %s@%s\n", entry.ID, entry.Version)
+
+	fsys, err := store.Prepare(*entry)
+	if err != nil {
+		return err
+	}
+	if err := scaffold.Render(fsys, ".", appName, vars); err != nil {
+		return fmt.Errorf("rendering template %s@%s failed: %w", entry.ID, entry.Version, err)
+	}
+	fmt.Printf("✓ Added %s\n", entry.Title)
+	return nil
+}
+
+// detectFlutterVersion reads the installed Flutter version for constraint
+// checking. An unreadable version returns empty, which SKIPS the check rather
+// than failing it — refusing to scaffold because a version string could not
+// be parsed is a worse outcome than installing a template that may want
+// something newer.
+func detectFlutterVersion() string {
+	out, err := exec.Command("flutter", "--version").Output()
+	if err != nil {
+		return ""
+	}
+	// "Flutter 3.35.2 • channel stable • ..."
+	fields := strings.Fields(string(out))
+	if len(fields) >= 2 && fields[0] == "Flutter" {
+		return fields[1]
+	}
+	return ""
+}
+
 func init() {
 	createCmd.Flags().StringVar(&createProjectID, "project", "", "Koolbase project ID to wire the app to (skips the picker)")
 	createCmd.Flags().StringVar(&createOrg, "org", "", "organization ID (defaults to your own)")
 	createCmd.Flags().BoolVar(&createFlavors, "flavors", false, "generate dev/staging/prod flavor configs")
 	createCmd.Flags().BoolVar(&createSkipPub, "skip-pub-get", false, "do not run flutter pub get after scaffolding")
+	createCmd.Flags().StringVar(&createTemplate, "template", "", "a template to include, e.g. `chat` or `chat@1.2.0` (see `koolbase templates list`)")
 }
