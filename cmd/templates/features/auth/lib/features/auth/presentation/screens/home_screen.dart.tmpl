@@ -1,27 +1,72 @@
+import 'auth_error_banner.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:koolbase_flutter/koolbase_flutter.dart';
 
 import '../../application/auth_controller.dart';
+import '../widgets/auth_scaffold.dart';
 import 'login_screen.dart';
 
 /// The app's entry screen.
 ///
 /// KoolbaseAuthGate does the branching: it restores a persisted session at
-/// mount (so a returning user never sees a login flash), follows auth state
-/// changes, and treats an offline restore as signed in.
+/// mount — showing the restoring slot rather than flashing a sign-in screen at
+/// someone who is already signed in — follows auth state changes, and treats
+/// an offline restore as signed in.
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
     return KoolbaseAuthGate(
+      restoring: (context) => const _RestoringScreen(),
       signedOut: (context) => const LoginScreen(),
       signedIn: (context, user) => _SignedInHome(user: user),
     );
   }
 }
 
+/// Shown while a persisted session is restored.
+///
+/// A fraction of a second on a fast connection and considerably longer on a
+/// poor one. It must read as "still starting", not as a failure — which is
+/// why it carries a word rather than only a spinner.
+class _RestoringScreen extends StatelessWidget {
+  const _RestoringScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Scaffold(
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(
+              height: 22,
+              width: 22,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Restoring session…',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The screen a newly signed-in user lands on before the developer has built
+/// anything.
+///
+/// It exists to prove the whole loop worked and then get out of the way. Say
+/// so plainly: this is a placeholder, and replacing it is the next thing to
+/// do.
 class _SignedInHome extends ConsumerWidget {
   const _SignedInHome({required this.user});
 
@@ -30,41 +75,56 @@ class _SignedInHome extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    final scope = KoolbaseAuthScope.of(context);
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('{% .AppTitle %}'),
-        actions: [
-          IconButton(
-            tooltip: 'Sign out',
-            icon: const Icon(Icons.logout),
-            onPressed: () => ref.read(authControllerProvider.notifier).signOut(),
-          ),
-        ],
-      ),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.check_circle_outline,
-                  size: 56, color: theme.colorScheme.primary),
-              const SizedBox(height: 16),
-              Text('You are signed in', style: theme.textTheme.headlineSmall),
-              const SizedBox(height: 8),
-              Text(user.email, style: theme.textTheme.bodyMedium),
-              const SizedBox(height: 32),
-              Text(
-                'This screen is a starting point. Add a feature with '
-                '`koolbase add <feature>`, or start building — the code is yours.',
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodySmall,
-              ),
-            ],
+    return AuthScaffold(
+      // The session was restored without network: signed in, but requests may
+      // fail until connectivity returns.
+      offline: scope.restoredOffline,
+      children: [
+        Icon(
+          Icons.check_circle_outline,
+          size: 64,
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+        const SizedBox(height: 20),
+        Text(
+          "You're signed in.",
+          textAlign: TextAlign.center,
+          style: theme.textTheme.headlineSmall?.copyWith(
+            fontWeight: FontWeight.w700,
+            letterSpacing: -0.4,
           ),
         ),
-      ),
+        const SizedBox(height: 8),
+        Text(
+          user.email,
+          textAlign: TextAlign.center,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 20),
+        Text(
+          'Authentication is working against your Koolbase project. Replace '
+          "this screen with your application's home screen — this code is "
+          'yours now.',
+          textAlign: TextAlign.center,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+            height: 1.5,
+          ),
+        ),
+        const SizedBox(height: 28),
+        // A failed sign-out must say so. Without this the user taps, the
+        // request fails, and nothing on screen changes.
+        AuthErrorBanner(state: ref.watch(authControllerProvider)),
+        AuthPrimaryButton(
+          label: 'Sign out',
+          busy: ref.watch(authControllerProvider).isLoading,
+          onPressed: () => ref.read(authControllerProvider.notifier).signOut(),
+        ),
+      ],
     );
   }
 }

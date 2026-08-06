@@ -1,0 +1,59 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:koolbase_flutter/koolbase_flutter.dart';
+
+/// A submission failure, stated in human terms.
+///
+/// Koolbase raises typed exceptions rather than status codes, so a screen can
+/// say what actually went wrong. That distinction matters: a wrong password
+/// and an unreachable network are different problems with different remedies,
+/// and collapsing them into "something went wrong" leaves the user with
+/// nothing to do.
+///
+/// Field-level validation is NOT shown here — that belongs inline, beside the
+/// field that is wrong. This is for failures the form could not have caught.
+class AuthErrorBanner extends StatelessWidget {
+  const AuthErrorBanner({super.key, required this.state});
+
+  final AsyncValue<void> state;
+
+  @override
+  Widget build(BuildContext context) {
+    final error = state.error;
+    if (error == null) return const SizedBox.shrink();
+
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.errorContainer,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(Icons.error_outline,
+                size: 18, color: theme.colorScheme.onErrorContainer),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                _message(error),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onErrorContainer,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _message(Object error) {
+    if (error is KoolbaseAuthException) return error.message;
+    if (error is KoolbaseException) return error.message;
+    return 'Something went wrong. Please try again.';
+  }
+}

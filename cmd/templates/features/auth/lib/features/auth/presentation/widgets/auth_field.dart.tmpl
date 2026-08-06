@@ -1,0 +1,172 @@
+import 'package:flutter/material.dart';
+
+/// A labelled text field for the authentication screens.
+///
+/// The label sits ABOVE the field rather than floating inside it, so it stays
+/// readable while typing and leaves room for a trailing action on the same
+/// line — "Forgot password?" beside the password label.
+///
+/// Validation errors appear inline beneath the field AND as an icon inside
+/// it: specific, adjacent to what is wrong, and never communicated by colour
+/// alone, which is invisible to some readers and to a screenshot.
+class AuthField extends StatefulWidget {
+  const AuthField({
+    super.key,
+    required this.controller,
+    required this.label,
+    this.hint,
+    this.trailing,
+    this.helper,
+    this.prefixIcon,
+    this.obscureText = false,
+    this.keyboardType,
+    this.textInputAction,
+    this.autofillHints,
+    this.validator,
+    this.onFieldSubmitted,
+    this.enabled = true,
+  });
+
+  final TextEditingController controller;
+  final String label;
+  final String? hint;
+
+  /// Shown on the label's line, right-aligned. Used for "Forgot password?".
+  final Widget? trailing;
+
+  /// A requirement stated BEFORE the user can get it wrong — password rules
+  /// belong here, not only in an error after a failed attempt.
+  final String? helper;
+
+  /// An optional leading icon inside the field.
+  final IconData? prefixIcon;
+
+  /// When true the field is a password: obscured, with a visibility toggle.
+  final bool obscureText;
+
+  final TextInputType? keyboardType;
+  final TextInputAction? textInputAction;
+  final Iterable<String>? autofillHints;
+  final String? Function(String?)? validator;
+  final void Function(String)? onFieldSubmitted;
+  final bool enabled;
+
+  @override
+  State<AuthField> createState() => _AuthFieldState();
+}
+
+class _AuthFieldState extends State<AuthField> {
+  late bool _obscured = widget.obscureText;
+  bool _hasError = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              widget.label,
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            if (widget.trailing != null) widget.trailing!,
+          ],
+        ),
+        const SizedBox(height: 6),
+        TextFormField(
+          controller: widget.controller,
+          obscureText: _obscured,
+          keyboardType: widget.keyboardType,
+          textInputAction: widget.textInputAction,
+          autofillHints: widget.autofillHints,
+          onFieldSubmitted: widget.onFieldSubmitted,
+          enabled: widget.enabled,
+          // Re-validate as the user types once they have seen an error, so a
+          // correction clears it immediately rather than only on resubmit.
+          autovalidateMode:
+              _hasError
+                  ? AutovalidateMode.onUserInteraction
+                  : AutovalidateMode.disabled,
+          validator: (value) {
+            final result = widget.validator?.call(value);
+            // The error icon needs to know; setState during build is not
+            // allowed, so defer it a frame.
+            if ((result != null) != _hasError) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) setState(() => _hasError = result != null);
+              });
+            }
+            return result;
+          },
+          decoration: InputDecoration(
+            hintText: widget.hint,
+            helperText: widget.helper,
+            helperMaxLines: 2,
+            errorMaxLines: 2,
+            isDense: true,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 14,
+              vertical: 14,
+            ),
+            prefixIcon:
+                widget.prefixIcon == null
+                    ? null
+                    : Icon(widget.prefixIcon, size: 20),
+            suffixIcon: _suffix(theme),
+            // An outlined box in every state, differing only by the border's
+            // colour and weight — so focus and error read as the same control
+            // changing rather than as different controls.
+            border: _border(theme.colorScheme.outlineVariant),
+            enabledBorder: _border(theme.colorScheme.outlineVariant),
+            focusedBorder: _border(theme.colorScheme.primary, width: 1.5),
+            errorBorder: _border(theme.colorScheme.error),
+            focusedErrorBorder: _border(theme.colorScheme.error, width: 1.5),
+            disabledBorder: _border(
+              theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// The visibility toggle for passwords, the error mark otherwise. A password
+  /// field in error shows the toggle: being able to see what you typed is more
+  /// useful than being told again that it is wrong.
+  Widget? _suffix(ThemeData theme) {
+    if (widget.obscureText) {
+      return IconButton(
+        onPressed: () => setState(() => _obscured = !_obscured),
+        icon: Icon(
+          _obscured ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+        ),
+        iconSize: 20,
+        splashRadius: 20,
+        tooltip: _obscured ? 'Show password' : 'Hide password',
+        color: theme.colorScheme.onSurfaceVariant,
+      );
+    }
+    if (_hasError) {
+      return Icon(
+        Icons.error_outline,
+        size: 20,
+        color: theme.colorScheme.error,
+      );
+    }
+    return null;
+  }
+
+  OutlineInputBorder _border(Color color, {double width = 1}) {
+    return OutlineInputBorder(
+      borderRadius: BorderRadius.circular(8),
+      borderSide: BorderSide(color: color, width: width),
+    );
+  }
+}

@@ -2,10 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../../core/widgets/app_text_field.dart';
 import '../../application/auth_controller.dart';
-import '../widgets/auth_error_text.dart';
+import '../widgets/auth_field.dart';
+import '../widgets/auth_scaffold.dart';
+import 'auth_error_banner.dart';
 
+/// Sign in.
+///
+/// Deliberately without a logo, a wordmark, or terms copy: the developer
+/// brings their own brand, and anything placed there is the first thing they
+/// delete.
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
 
@@ -19,6 +25,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _password = TextEditingController();
 
   @override
+  void initState() {
+    super.initState();
+    // A failure from a previous screen is not this screen's error.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(authControllerProvider.notifier).clearError();
+    });
+  }
+
+  @override
   void dispose() {
     _email.dispose();
     _password.dispose();
@@ -27,12 +42,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-    await ref.read(authControllerProvider.notifier).signIn(
-          email: _email.text.trim(),
-          password: _password.text,
-        );
-    // No navigation needed: KoolbaseAuthGate swaps the tree when the session
-    // appears.
+    await ref
+        .read(authControllerProvider.notifier)
+        .signIn(email: _email.text.trim(), password: _password.text);
+    // No navigation: KoolbaseAuthGate swaps the tree when a session appears.
   }
 
   @override
@@ -40,72 +53,79 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final state = ref.watch(authControllerProvider);
     final busy = state.isLoading;
 
-    return Scaffold(
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 420),
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text('{% .AppTitle %}',
-                        style: Theme.of(context).textTheme.headlineMedium,
-                        textAlign: TextAlign.center),
-                    const SizedBox(height: 32),
-                    AppTextField(
-                      controller: _email,
-                      label: 'Email',
-                      keyboardType: TextInputType.emailAddress,
-                      textInputAction: TextInputAction.next,
-                      autofillHints: const [AutofillHints.email],
-                      validator: (v) => (v == null || !v.contains('@'))
-                          ? 'Enter your email'
-                          : null,
-                    ),
-                    const SizedBox(height: 16),
-                    AppTextField(
-                      controller: _password,
-                      label: 'Password',
-                      obscureText: true,
-                      textInputAction: TextInputAction.done,
-                      autofillHints: const [AutofillHints.password],
-                      validator: (v) => (v == null || v.isEmpty)
-                          ? 'Enter your password'
-                          : null,
-                    ),
-                    AuthErrorText(state: state),
-                    const SizedBox(height: 24),
-                    FilledButton(
-                      onPressed: busy ? null : _submit,
-                      child: busy
-                          ? const SizedBox(
-                              height: 18,
-                              width: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2))
-                          : const Text('Sign in'),
-                    ),
-                    const SizedBox(height: 8),
-                    TextButton(
-                      onPressed:
-                          busy ? null : () => context.pushNamed('forgot-password'),
-                      child: const Text('Forgot password?'),
-                    ),
-                    TextButton(
-                      onPressed: busy ? null : () => context.pushNamed('register'),
-                      child: const Text('Create an account'),
-                    ),
-                  ],
-                ),
+    return AuthScaffold(
+      children: [
+        Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const AuthHeader(title: 'Sign In', subtitle: 'Welcome back.'),
+              AuthErrorBanner(state: state),
+              AuthField(
+                controller: _email,
+                label: 'Email address',
+                hint: 'dev@koolbase.com',
+                enabled: !busy,
+                keyboardType: TextInputType.emailAddress,
+                textInputAction: TextInputAction.next,
+                autofillHints: const [AutofillHints.email],
+                prefixIcon: Icons.email_outlined,
+                validator: (v) {
+                  final value = (v ?? '').trim();
+                  if (value.isEmpty) return 'Enter your email address.';
+                  if (!value.contains('@') || !value.contains('.')) {
+                    return 'Please enter a valid email address.';
+                  }
+                  return null;
+                },
               ),
-            ),
+              const SizedBox(height: 20),
+              AuthField(
+                controller: _password,
+                label: 'Password',
+                enabled: !busy,
+                hint: '**********',
+                obscureText: true,
+                prefixIcon: Icons.lock_outline_rounded,
+                textInputAction: TextInputAction.done,
+                autofillHints: const [AutofillHints.password],
+                onFieldSubmitted: (_) => busy ? null : _submit(),
+                trailing: TextButton(
+                  onPressed:
+                      busy ? null : () => context.pushNamed('forgot-password'),
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: Text(
+                    'Forgot password?',
+                    style: Theme.of(context).textTheme.labelMedium,
+                  ),
+                ),
+                validator:
+                    (v) =>
+                        (v == null || v.isEmpty)
+                            ? 'Enter your password.'
+                            : null,
+              ),
+              const SizedBox(height: 28),
+              AuthPrimaryButton(
+                label: 'Sign in',
+                busy: busy,
+                onPressed: _submit,
+              ),
+              const SizedBox(height: 12),
+              AuthFooterLink(
+                prompt: "Don't have an account?",
+                action: 'Create account',
+                onPressed: busy ? null : () => context.pushNamed('register'),
+              ),
+            ],
           ),
         ),
-      ),
+      ],
     );
   }
 }

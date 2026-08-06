@@ -17,9 +17,10 @@ class AuthController extends AsyncNotifier<void> {
     final result = await AsyncValue.guard(
       () => _repo.signIn(email: email, password: password),
     );
-    state = result.hasError
-        ? AsyncValue.error(result.error!, result.stackTrace!)
-        : const AsyncValue.data(null);
+    state =
+        result.hasError
+            ? AsyncValue.error(result.error!, result.stackTrace!)
+            : const AsyncValue.data(null);
     return !result.hasError;
   }
 
@@ -30,31 +31,45 @@ class AuthController extends AsyncNotifier<void> {
   }) async {
     state = const AsyncValue.loading();
     final result = await AsyncValue.guard(
-      () => _repo.register(email: email, password: password, fullName: fullName),
+      () =>
+          _repo.register(email: email, password: password, fullName: fullName),
     );
-    state = result.hasError
-        ? AsyncValue.error(result.error!, result.stackTrace!)
-        : const AsyncValue.data(null);
+    state =
+        result.hasError
+            ? AsyncValue.error(result.error!, result.stackTrace!)
+            : const AsyncValue.data(null);
     return !result.hasError;
   }
 
   Future<bool> sendPasswordReset(String email) async {
     state = const AsyncValue.loading();
     final result = await AsyncValue.guard(() => _repo.sendPasswordReset(email));
-    state = result.hasError
-        ? AsyncValue.error(result.error!, result.stackTrace!)
-        : const AsyncValue.data(null);
+    state =
+        result.hasError
+            ? AsyncValue.error(result.error!, result.stackTrace!)
+            : const AsyncValue.data(null);
     return !result.hasError;
   }
 
   Future<void> signOut() async {
     state = const AsyncValue.loading();
     final result = await AsyncValue.guard(_repo.signOut);
-    state = result.hasError
-        ? AsyncValue.error(result.error!, result.stackTrace!)
-        : const AsyncValue.data(null);
+    state =
+        result.hasError
+            ? AsyncValue.error(result.error!, result.stackTrace!)
+            : const AsyncValue.data(null);
+  }
+
+  /// Clears a failure so a screen does not carry another screen's error.
+  ///
+  /// The controller is shared across sign-in, register, and reset, so an
+  /// error raised on one screen is still there when the user navigates to
+  /// the next. Screens call this when they mount.
+  void clearError() {
+    if (state.hasError) state = const AsyncValue.data(null);
   }
 }
 
-final authControllerProvider =
-    AsyncNotifierProvider<AuthController, void>(AuthController.new);
+final authControllerProvider = AsyncNotifierProvider<AuthController, void>(
+  AuthController.new,
+);

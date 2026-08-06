@@ -2,10 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../../core/widgets/app_text_field.dart';
 import '../../application/auth_controller.dart';
-import '../widgets/auth_error_text.dart';
+import '../widgets/auth_field.dart';
+import '../widgets/auth_scaffold.dart';
+import 'auth_error_banner.dart';
 
+/// Create an account.
+///
+/// Registration signs the user in, so there is no navigation on success — the
+/// gate swaps the tree and this screen pops away beneath it.
 class RegisterScreen extends ConsumerStatefulWidget {
   const RegisterScreen({super.key});
 
@@ -20,6 +25,15 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   final _password = TextEditingController();
 
   @override
+  void initState() {
+    super.initState();
+    // A failure from a previous screen is not this screen's error.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(authControllerProvider.notifier).clearError();
+    });
+  }
+
+  @override
   void dispose() {
     _name.dispose();
     _email.dispose();
@@ -29,15 +43,15 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-    final ok = await ref.read(authControllerProvider.notifier).register(
+    final name = _name.text.trim();
+    final ok = await ref
+        .read(authControllerProvider.notifier)
+        .register(
           email: _email.text.trim(),
           password: _password.text,
-          fullName: _name.text.trim().isEmpty ? null : _name.text.trim(),
+          fullName: name.isEmpty ? null : name,
         );
-    if (ok && mounted) {
-      // Registration signs the user in; pop back so the gate shows the app.
-      context.pop();
-    }
+    if (ok && mounted) context.pop();
   }
 
   @override
@@ -45,66 +59,82 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     final state = ref.watch(authControllerProvider);
     final busy = state.isLoading;
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Create account')),
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 420),
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    AppTextField(
-                      controller: _name,
-                      label: 'Name (optional)',
-                      textInputAction: TextInputAction.next,
-                      autofillHints: const [AutofillHints.name],
-                    ),
-                    const SizedBox(height: 16),
-                    AppTextField(
-                      controller: _email,
-                      label: 'Email',
-                      keyboardType: TextInputType.emailAddress,
-                      textInputAction: TextInputAction.next,
-                      autofillHints: const [AutofillHints.email],
-                      validator: (v) => (v == null || !v.contains('@'))
-                          ? 'Enter your email'
-                          : null,
-                    ),
-                    const SizedBox(height: 16),
-                    AppTextField(
-                      controller: _password,
-                      label: 'Password',
-                      obscureText: true,
-                      textInputAction: TextInputAction.done,
-                      autofillHints: const [AutofillHints.newPassword],
-                      validator: (v) => (v == null || v.length < 8)
-                          ? 'At least 8 characters'
-                          : null,
-                    ),
-                    AuthErrorText(state: state),
-                    const SizedBox(height: 24),
-                    FilledButton(
-                      onPressed: busy ? null : _submit,
-                      child: busy
-                          ? const SizedBox(
-                              height: 18,
-                              width: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2))
-                          : const Text('Create account'),
-                    ),
-                  ],
-                ),
+    return AuthScaffold(
+      children: [
+        Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const AuthHeader(
+                title: 'Create account',
+                subtitle: 'Sign up to get started.',
               ),
-            ),
+              AuthErrorBanner(state: state),
+              AuthField(
+                controller: _name,
+                label: 'Name (optional)',
+                hint: 'John Doe',
+                enabled: !busy,
+                prefixIcon: Icons.person_outline_rounded,
+                textInputAction: TextInputAction.next,
+                autofillHints: const [AutofillHints.name],
+              ),
+              const SizedBox(height: 20),
+              AuthField(
+                controller: _email,
+                label: 'Email address',
+                hint: 'dev@koolbase.com',
+                prefixIcon: Icons.email_outlined,
+                enabled: !busy,
+                keyboardType: TextInputType.emailAddress,
+                textInputAction: TextInputAction.next,
+                autofillHints: const [AutofillHints.email],
+                validator: (v) {
+                  final value = (v ?? '').trim();
+                  if (value.isEmpty) return 'Enter your email address.';
+                  if (!value.contains('@') || !value.contains('.')) {
+                    return 'Please enter a valid email address.';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 20),
+              AuthField(
+                controller: _password,
+                label: 'Password',
+                hint: '**********',
+                enabled: !busy,
+                obscureText: true,
+                prefixIcon: Icons.lock_outline_rounded,
+                textInputAction: TextInputAction.done,
+                autofillHints: const [AutofillHints.newPassword],
+                onFieldSubmitted: (_) => busy ? null : _submit(),
+                // Stated before it can be got wrong, rather than only in an
+                // error after a failed attempt.
+                helper: 'Must be at least 8 characters long.',
+                validator:
+                    (v) =>
+                        (v == null || v.length < 8)
+                            ? 'Use at least 8 characters.'
+                            : null,
+              ),
+              const SizedBox(height: 28),
+              AuthPrimaryButton(
+                label: 'Create account',
+                busy: busy,
+                onPressed: _submit,
+              ),
+              const SizedBox(height: 12),
+              AuthFooterLink(
+                prompt: 'Already have an account?',
+                action: 'Sign in',
+                onPressed: busy ? null : () => context.pop(),
+              ),
+            ],
           ),
         ),
-      ),
+      ],
     );
   }
 }

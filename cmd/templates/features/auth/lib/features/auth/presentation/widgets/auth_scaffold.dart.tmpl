@@ -1,0 +1,260 @@
+import 'package:flutter/material.dart';
+
+/// The frame every authentication screen sits in.
+///
+/// One place for what all four screens share: a centred, max-width column,
+/// generous padding, scroll-on-overflow so a keyboard covering half a small
+/// screen never hides the field being typed into, and the offline banner.
+/// Screens supply only their own content.
+class AuthScaffold extends StatelessWidget {
+  const AuthScaffold({
+    super.key,
+    required this.children,
+    this.leading,
+    this.offline = false,
+  });
+
+  /// The screen's content, laid out in a column.
+  final List<Widget> children;
+
+  /// An optional control above the content — a back affordance, typically.
+  final Widget? leading;
+
+  /// When true, shows a quiet persistent banner: the session was restored
+  /// without network, so the user IS signed in but requests may fail until
+  /// connectivity returns.
+  final bool offline;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      resizeToAvoidBottomInset: true,
+      body: SafeArea(
+        child: Column(
+          children: [
+            if (offline) const OfflineBanner(),
+            Expanded(
+              child: Center(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 32,
+                  ),
+                  child: ConstrainedBox(
+                    // Wide screens get a centred column rather than fields
+                    // stretched across a tablet.
+                    constraints: const BoxConstraints(maxWidth: 400),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (leading != null) ...[
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: leading!,
+                          ),
+                          const SizedBox(height: 24),
+                        ],
+                        ...children,
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A quiet, persistent indicator that the app is working from a restored
+/// offline session.
+///
+/// Deliberately not a dialog or a snackbar: it describes a condition rather
+/// than an event, and dismissing it would not change anything.
+class OfflineBanner extends StatelessWidget {
+  const OfflineBanner({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      color: theme.colorScheme.surfaceContainerHighest,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Row(
+        children: [
+          Icon(
+            Icons.cloud_off_outlined,
+            size: 16,
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              "You're signed in. Some actions may be unavailable until you're "
+              'back online.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A screen's title and supporting line.
+class AuthHeader extends StatelessWidget {
+  const AuthHeader({super.key, required this.title, this.subtitle});
+
+  final String title;
+  final String? subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        // Your app's logo goes here — replace this placeholder.
+        CircleAvatar(
+          radius: 48,
+          // Inverted, like the primary button: near-black on white in light,
+          // near-white on black in dark.
+          backgroundColor: scheme.onSurface,
+          child: Icon(Icons.person_rounded, size: 48, color: scheme.surface),
+        ),
+        const SizedBox(height: 16),
+        Text(
+          title,
+          // No color override: headlineSmall already carries onSurface, so
+          // it inverts with the theme. Hardcoding black makes the title
+          // invisible in dark mode.
+          style: theme.textTheme.headlineSmall?.copyWith(
+            fontWeight: FontWeight.w700,
+            letterSpacing: -0.4,
+          ),
+        ),
+        if (subtitle != null) ...[
+          const SizedBox(height: 6),
+          Text(
+            subtitle!,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+        const SizedBox(height: 32),
+      ],
+    );
+  }
+}
+
+/// The primary action: full width, filled, showing progress in place.
+///
+/// The indicator replaces the label inside the same box, so submitting never
+/// changes the button's size and the form does not jump.
+class AuthPrimaryButton extends StatelessWidget {
+  const AuthPrimaryButton({
+    super.key,
+    required this.label,
+    required this.onPressed,
+    this.busy = false,
+  });
+
+  final String label;
+  final VoidCallback? onPressed;
+  final bool busy;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    // Near-black on white in light, near-white on black in dark. Taken from
+    // the scheme rather than hardcoded, so the button inverts with the theme
+    // instead of disappearing into a dark background.
+    final background = scheme.onSurface;
+    final foreground = scheme.surface;
+
+    return SizedBox(
+      height: 50,
+      child: FilledButton(
+        onPressed: busy ? null : onPressed,
+        style: FilledButton.styleFrom(
+          backgroundColor: background,
+          foregroundColor: foreground,
+          disabledBackgroundColor: scheme.onSurface.withValues(alpha: 0.12),
+          disabledForegroundColor: scheme.onSurface.withValues(alpha: 0.38),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          textStyle: const TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.2,
+          ),
+        ),
+        child:
+            busy
+                ? SizedBox(
+                  height: 18,
+                  width: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    // The default indicator is the primary color, which
+                    // vanishes on a near-black fill.
+                    color: foreground,
+                  ),
+                )
+                : Text(label),
+      ),
+    );
+  }
+}
+
+/// The secondary route off a screen — "Create account", "Back to sign in".
+class AuthFooterLink extends StatelessWidget {
+  const AuthFooterLink({
+    super.key,
+    required this.prompt,
+    required this.action,
+    required this.onPressed,
+  });
+
+  final String prompt;
+  final String action;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Text(
+          prompt,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        TextButton(
+          onPressed: onPressed,
+          style: TextButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            minimumSize: Size.zero,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+          child: Text(
+            action,
+            style: theme.textTheme.bodySmall?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}

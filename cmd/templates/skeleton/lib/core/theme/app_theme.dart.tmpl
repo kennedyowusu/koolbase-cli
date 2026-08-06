@@ -8,15 +8,33 @@ class AppTheme {
   static const _seed = Color(0xFF3B82F6);
 
   static ThemeData get light => ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: _seed),
-        useMaterial3: true,
-      );
+    colorScheme: ColorScheme.fromSeed(
+      seedColor: _seed,
+      brightness: Brightness.light,
+    ).copyWith(
+      // The seed tints every neutral toward blue. This design is
+      // monochrome with blue used only where it means something, so the
+      // neutrals are pinned back to true greys.
+      surface: Colors.white,
+      onSurface: const Color(0xFF0A0A0B),
+      onSurfaceVariant: const Color(0xFF6B7280),
+      outlineVariant: const Color(0xFFE5E7EB),
+      surfaceContainerHighest: const Color(0xFFF4F4F5),
+    ),
+    useMaterial3: true,
+  );
 
   static ThemeData get dark => ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: _seed,
-          brightness: Brightness.dark,
-        ),
-        useMaterial3: true,
-      );
+    colorScheme: ColorScheme.fromSeed(
+      seedColor: _seed,
+      brightness: Brightness.dark,
+    ).copyWith(
+      surface: const Color(0xFF0A0A0B),
+      onSurface: Colors.white,
+      onSurfaceVariant: const Color(0xFF9CA3AF),
+      outlineVariant: const Color(0xFF27272A),
+      surfaceContainerHighest: const Color(0xFF18181B),
+    ),
+    useMaterial3: true,
+  );
 }
