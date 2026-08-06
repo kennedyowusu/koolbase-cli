@@ -16,6 +16,11 @@ import "embed"
 //go:embed all:templates
 var templatesFS embed.FS
 
+// TemplatesFS exposes the embedded templates for the staleness check in
+// internal/embedded, which verifies they are a current export of their
+// sources rather than a hand-edited copy that has drifted.
+func TemplatesFS() embed.FS { return templatesFS }
+
 // flutterSDKConstraint is the koolbase_flutter version written into a
 // generated pubspec.yaml. Bump it when the SDK ships surface the templates
 // depend on — the widgets landed in 10.3.0.
