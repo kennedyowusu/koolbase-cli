@@ -36,8 +36,9 @@ import (
 // Only public key material appears here. The private key exists solely in the
 // publishing environment.
 var templateSigningKeys = map[string]string{
-	// TODO(keygen): fill in when the template keypair is generated.
-	// "kbtpl_2026_01": "<64 hex chars — 32-byte Ed25519 public key>",
+	// Generated 2026-08-06. Private key lives only in the publishing
+	// environment; this is the public half, and it is meant to be here.
+	"kbtpl_2026_01": "9f1a805e16c5b08a22836a2556d4b9b1810ff70c37f91ff7ca54e269cbd1c5df",
 }
 
 // devUnsignedEnv opts out of signature verification for local template
