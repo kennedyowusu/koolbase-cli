@@ -95,6 +95,22 @@ jobs:
           # manifest pointing at artifacts that aren't there yet.
           aws s3 cp dist/ "${BUCKET}/releases/${VERSION}/" --recursive \
             --exclude latest.json --endpoint-url "$R2_ENDPOINT"
+
+          # A prerelease publishes its versioned artifacts and stops. It must
+          # NOT move the latest pointers: v0.5.1-rc1 once pointed every
+          # installer at a release candidate, and restoring it meant re-running
+          # the previous release. A tag containing a hyphen is a prerelease by
+          # the semver convention, which is a rule the tagger already follows
+          # without being told.
+          case "${VERSION}" in
+            *-*)
+              echo "prerelease ${VERSION} — versioned artifacts published, latest pointers unchanged"
+              echo "install it explicitly:"
+              echo "  https://get.koolbase.com/releases/${VERSION}/koolbase-darwin-arm64"
+              exit 0
+              ;;
+          esac
+
           for f in dist/koolbase-*; do
             aws s3 cp "$f" "${BUCKET}/$(basename "$f")" --endpoint-url "$R2_ENDPOINT"
           done
