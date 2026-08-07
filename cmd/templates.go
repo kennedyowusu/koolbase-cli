@@ -24,4 +24,4 @@ func TemplatesFS() embed.FS { return templatesFS }
 // flutterSDKConstraint is the koolbase_flutter version written into a
 // generated pubspec.yaml. Bump it when the SDK ships surface the templates
 // depend on — the widgets landed in 10.3.0.
-const flutterSDKConstraint = "^10.3.0"
+const flutterSDKConstraint = "^10.4.0"
