@@ -28,6 +28,7 @@ var (
 	addForce   bool
 	addProject string
 	addDir     string
+	addYes     bool
 )
 
 var addCmd = &cobra.Command{
@@ -97,6 +98,16 @@ version compatible with your Flutter and SDK is used.`,
 		fsys, err := store.Prepare(*entry)
 		if err != nil {
 			return err
+		}
+
+		if !entry.Resources.IsEmpty() {
+			client, _, err := keysClient()
+			if err != nil {
+				return err
+			}
+			if err := provisionTemplate(client, vars.ProjectID, entry, addYes); err != nil {
+				return err
+			}
 		}
 
 		// Collisions are listed and refused rather than merged: overwriting
@@ -249,4 +260,5 @@ func init() {
 	addCmd.Flags().BoolVar(&addForce, "force", false, "overwrite existing files")
 	addCmd.Flags().StringVar(&addProject, "project", "", "Koolbase project ID (when the app has no koolbase_config.dart)")
 	addCmd.Flags().StringVar(&addDir, "dir", ".", "the Flutter project to add to")
+	addCmd.Flags().BoolVarP(&addYes, "yes", "y", false, "create backend resources without confirming")
 }

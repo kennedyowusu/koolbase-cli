@@ -115,6 +115,15 @@ architecture away; nothing tracks or upgrades it afterwards.`,
 			}
 		}
 
+		// Backend before files: generated screens referencing collections the
+		// installer failed to create are a half-made state whose failure stays
+		// invisible until something runs.
+		if templateEntry != nil {
+			if err := provisionTemplate(client, project.ID, templateEntry, false); err != nil {
+				return err
+			}
+		}
+
 		fmt.Printf("\nCreating Flutter app %s…\n", appName)
 		flutter := exec.Command("flutter", "create",
 			"--org", createOrgIdentifier(),
