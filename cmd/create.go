@@ -184,6 +184,8 @@ architecture away; nothing tracks or upgrades it afterwards.`,
 				// Not fatal: the project exists and is correct; the developer
 				// can run it themselves and see the real error.
 				fmt.Printf("\n⚠ flutter pub get failed — run it yourself in %s to see why\n", appName)
+			} else {
+				generateNativeSplash(appName)
 			}
 		}
 
@@ -479,6 +481,37 @@ func requireInteractive(what, flag string) error {
 	}
 	return fmt.Errorf(
 		"%s needs an interactive terminal, and stdin is not one — pass %s instead", what, flag)
+}
+
+// generateNativeSplash writes the native splash assets so a scaffolded app
+// does not flash white between the launcher tap and Flutter's first frame.
+//
+// This DOES write into the Android and iOS projects — the one place the CLI
+// does, and deliberately: those projects were created seconds ago by this
+// same command, so there is nothing of the developer's to damage. The
+// boundary exists to protect code someone has written, which is why
+// `koolbase add` reports this step instead of performing it.
+//
+// A tool that leaves you with "now go run this other command" mostly leaves
+// you without it: nobody runs the second command.
+//
+// Failure is not fatal. The project is complete and correct without a splash;
+// it just starts on white until the developer runs the generator themselves.
+func generateNativeSplash(appName string) {
+	fmt.Println("Generating the native splash…")
+
+	cmd := exec.Command("dart", "run", "flutter_native_splash:create")
+	cmd.Dir = appName
+	// Quiet on success — the generator is chatty, and its output is noise in
+	// the middle of a scaffold. Errors still surface below.
+	if out, err := cmd.CombinedOutput(); err != nil {
+		fmt.Printf("\n⚠ Could not generate the native splash. Your app is fine without one;\n")
+		fmt.Printf("  run this in %s when you want it:\n", appName)
+		fmt.Printf("      dart run flutter_native_splash:create\n")
+		if len(out) > 0 {
+			fmt.Printf("\n%s\n", strings.TrimSpace(string(out)))
+		}
+	}
 }
 
 func init() {
