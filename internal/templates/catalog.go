@@ -99,6 +99,11 @@ type Entry struct {
 	// a build that named it.
 	Deprecated bool   `json:"deprecated,omitempty"`
 	Notice     string `json:"notice,omitempty"`
+
+	// Resources is the backend this template needs, carried in the catalog so
+	// an install can be planned before anything downloads — a developer
+	// should see what will be created before it is.
+	Resources *Resources `json:"resources,omitempty"`
 }
 
 // ParseCatalog decodes a catalog document and refuses one written to a schema
