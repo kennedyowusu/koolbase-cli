@@ -5,12 +5,17 @@ import (
 
 	"github.com/kennedyowusu/koolbase-cli/internal/api"
 	"github.com/kennedyowusu/koolbase-cli/internal/config"
+	"github.com/kennedyowusu/koolbase-cli/internal/version"
 	"github.com/spf13/cobra"
 )
 
 var rootCmd = &cobra.Command{
-	Use:          "koolbase",
-	Short:        "Koolbase CLI — manage your Koolbase project from the terminal",
+	Use:   "koolbase",
+	Short: "Koolbase CLI — manage your Koolbase project from the terminal",
+	// Enables `koolbase --version`, which is what people type before
+	// discovering `koolbase version`. The template below makes the two
+	// produce identical output rather than two formats for one fact.
+	Version:      version.Version,
 	SilenceUsage: true,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		// Best-effort: label auth failures with the logged-in account.

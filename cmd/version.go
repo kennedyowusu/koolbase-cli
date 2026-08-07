@@ -19,4 +19,8 @@ var versionCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(versionCmd)
+	// `--version` and `version` must not disagree about how to state the
+	// same fact.
+	rootCmd.SetVersionTemplate(
+		fmt.Sprintf("Koolbase CLI %s (%s/%s)\n", version.Version, runtime.GOOS, runtime.GOARCH))
 }
