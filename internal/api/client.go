@@ -147,6 +147,15 @@ var identityHint string
 func SetIdentityHint(email string) { identityHint = email }
 
 func notFoundError() error {
+	// KOOLBASE_API_KEY overrides the logged-in session, so the request may
+	// have been made as an entirely different principal from the one the
+	// identity hint names. Saying "your account has no access" when the CLI
+	// authenticated as an API key for another org sends someone looking in
+	// the wrong place — it cost two rounds of debugging to notice.
+	if os.Getenv("KOOLBASE_API_KEY") != "" {
+		return fmt.Errorf("not found — either it does not exist, or the API key in KOOLBASE_API_KEY has no access to it.\n\nThat environment variable overrides your login. Run `koolbase whoami` to see which principal is in use, or `unset KOOLBASE_API_KEY` to use your logged-in account")
+	}
+
 	who := "the current account"
 	if identityHint != "" {
 		who = identityHint
@@ -155,13 +164,20 @@ func notFoundError() error {
 }
 
 func authError(status int) error {
-	who := "an unknown account (run `koolbase whoami`)"
-	if identityHint != "" {
-		who = identityHint
-	}
 	verb := "was rejected"
 	if status == http.StatusForbidden {
 		verb = "lacks access to this resource"
+	}
+
+	// Same reasoning as notFoundError: the env var wins over the login, so
+	// naming the logged-in account here would be wrong.
+	if os.Getenv("KOOLBASE_API_KEY") != "" {
+		return fmt.Errorf("the API key in KOOLBASE_API_KEY %s.\n\nThat environment variable overrides your login. Run `koolbase whoami` to see which principal is in use, or `unset KOOLBASE_API_KEY` to use your logged-in account", verb)
+	}
+
+	who := "an unknown account (run `koolbase whoami`)"
+	if identityHint != "" {
+		who = identityHint
 	}
 	return fmt.Errorf("authentication as %s %s — check `koolbase whoami`, or `koolbase login` with the account that owns this project", who, verb)
 }
