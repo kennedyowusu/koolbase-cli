@@ -25,5 +25,33 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^6.0.0
 
+  # Generates the native splash so the app does not flash white between the
+  # launcher tapping and Flutter's first frame. A dev dependency because we
+  # do not use preserve()/remove() — the splash ends when Flutter draws.
+  flutter_native_splash: ^2.4.8
+
 flutter:
   uses-material-design: true
+
+# The native splash, matched to the app's theme so launch is one continuous
+# surface rather than a white flash followed by your background.
+#
+# This config is not applied automatically: the generator writes into your
+# Android and iOS projects, which the Koolbase CLI deliberately does not touch.
+# Run it yourself, once, and again whenever you change these values:
+#
+#   dart run flutter_native_splash:create
+#
+# Add `image:` pointing at your own asset when you have one. Android 12 and
+# later use the launcher icon rather than a background image, which is why
+# android_12 is configured separately.
+flutter_native_splash:
+  color: "#FFFFFF"
+  color_dark: "#0A0A0B"
+  android: true
+  ios: true
+  web: false
+
+  android_12:
+    color: "#FFFFFF"
+    color_dark: "#0A0A0B"

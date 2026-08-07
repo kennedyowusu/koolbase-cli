@@ -15,6 +15,7 @@ import (
 	"github.com/kennedyowusu/koolbase-cli/internal/scaffold"
 	"github.com/kennedyowusu/koolbase-cli/internal/templates"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 // `koolbase create` scaffolds a Flutter app that is Koolbase-native from the
@@ -224,6 +225,10 @@ func resolveProject(client *api.Client, orgID string) (*api.Project, error) {
 		return nil, err
 	}
 
+	if err := requireInteractive("choosing a project", "--project <id>"); err != nil {
+		return nil, err
+	}
+
 	fmt.Println("\nWhich Koolbase project should this app use?")
 	for i, p := range projects {
 		fmt.Printf("  %d) %s\n", i+1, p.Name)
@@ -275,6 +280,10 @@ func resolveEnvironment(client *api.Client, projectID string) (*api.Environment,
 		if envs[i].Slug == "development" || envs[i].Slug == "dev" {
 			return &envs[i], nil
 		}
+	}
+
+	if err := requireInteractive("choosing an environment", "--project <id> for a project with a development environment"); err != nil {
+		return nil, err
 	}
 
 	fmt.Println("\nThis project has no development environment. Existing:")
@@ -356,6 +365,10 @@ func resolveFlavorEnvironments(client *api.Client, projectID string) (*flavorEnv
 	fmt.Printf("\n--flavors needs one environment per flavor. This project is missing: %s\n",
 		strings.Join(missing, ", "))
 	fmt.Printf("Creating %d environment(s) counts against your plan's limit.\n", len(missing))
+	if err := requireInteractive("confirming environment creation", "a project that already has development, staging and production"); err != nil {
+		return nil, err
+	}
+
 	fmt.Print("Create them now? [Y/n]: ")
 
 	reader := bufio.NewReader(os.Stdin)
@@ -451,6 +464,21 @@ func detectFlutterVersion() string {
 		return fields[1]
 	}
 	return ""
+}
+
+// requireInteractive refuses to prompt when stdin is not a terminal.
+//
+// A buffered or piped invocation — a wrapper script, a CI step, `| tail` —
+// swallows the prompt entirely: the user sees a hung terminal with no
+// indication that a choice is expected. An error naming the flag that
+// avoids the prompt is the difference between "broken" and "I need an
+// argument".
+func requireInteractive(what, flag string) error {
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		return nil
+	}
+	return fmt.Errorf(
+		"%s needs an interactive terminal, and stdin is not one — pass %s instead", what, flag)
 }
 
 func init() {
