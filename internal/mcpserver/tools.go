@@ -1025,7 +1025,12 @@ QUERIES ARE STALE-WHILE-REVALIDATE. A query returns the cached result
 immediately when one exists, then refreshes from the network in the
 background. Design UI for data that can arrive twice: render the first
 result, update when the refresh lands. Do not treat the first result as
-final.
+final. When code needs the network's answer directly — read-after-write
+(verifying the effect of a write it just made), reconciliation, or feeding a
+local store that must only ingest server-confirmed data — pass fresh:
+get(fresh: true) skips the cache and returns the server's current answer
+(Flutter SDK >= 11.1.0). Do not emulate this by awaiting .stream; that is
+racy.
 
 WRITES ARE OFFLINE-AWARE. Inserts made offline are queued per-user and sync
 when connectivity returns. Records carry server-assigned system fields: $id,
@@ -1071,6 +1076,7 @@ Queries — a BUILDER CHAIN off collection():
         .orderBy('created_at', descending: true)
         .limit(20)
         .get();                                    // Future<QueryResult>
+    // .get(fresh: true) skips the cache — read-after-write / reconciliation.
     final records = result.records;                // List<KoolbaseRecord>
     // .stream on the same query emits refreshed results (SWR second arrival).
 
