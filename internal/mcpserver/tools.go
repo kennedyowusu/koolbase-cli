@@ -1139,6 +1139,30 @@ them means three correct lines instead of thirty plausible ones:
     // (KoolbaseQuery mutates, and stream identity derives from filters).
     // For custom scroll layouts, drive KoolbaseCollectionController
     // directly; it owns the fetch/stream lifecycle widget-free.
+Fiscal — authority-grade sales recording (Ghana GRA live; kb-ref elsewhere):
+    final r = await Koolbase.fiscal.submit(
+      deviceId: device,            // from fiscal device onboarding
+      clientRef: saleId,           // YOUR durable ref — IDEMPOTENT:
+                                   // resubmitting the same ref returns the
+                                   // same intent; retries are ALWAYS safe
+      payload: {...},              // adapter-shaped map (see fiscal docs
+                                   // for the device's jurisdiction)
+    );
+    // r.status: blocked (r.blockedReason set, NOTHING consumed — fix and
+    // resubmit same ref) | queued/submitting/retrying (r.isPending — poll)
+    // | fiscalized (r.isFiscalized).
+    final s = await Koolbase.fiscal.status(deviceId: d, clientRef: saleId);
+    // Receipt rendering: once s.isFiscalized, s.certification carries what
+    // the authority granted (Ghana: ysdcregsig signature, ysdcrecnum
+    // receipt number, qr_code URL to render as a QR image). A fiscalized
+    // result with NULL certification is VALID for non-certifying kinds
+    // (e.g. PURCHASE) — never treat it as an error.
+    // Fiscal does NOT ride the offline outbox by design: record the
+    // commercial sale locally (db module) and submit fiscally on
+    // reconnect — the idempotent clientRef makes the replay trivial.
+    // Errors: KoolbaseUnauthenticatedException (auth) or FiscalException
+    // (network/server, .statusCode when received). A submit timeout may
+    // still fiscalize — poll status with the same clientRef.
 `
 
 const sdkReactNativeConventions = `
