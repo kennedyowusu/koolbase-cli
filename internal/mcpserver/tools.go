@@ -1057,6 +1057,17 @@ session — treat it as "signed out", not as a retryable error.
 `
 
 const sdkFlutterConventions = `
+STORAGE PUBLIC URLS (v11.4+). For images and files in PUBLIC buckets, build
+the stable CDN URL with Koolbase.storage.publicUrlFor(bucket:, path:,
+transform:) — synchronous, no network call, no projectId argument (the SDK
+learns its project identity from bootstrap). Pass a KoolbaseImageTransform
+for edge resizing (width/height/format/quality/fit). It THROWS
+KoolbaseStorageProjectIdentityException (code project_identity_unavailable)
+if the first bootstrap has never completed; that is a transient startup
+state, distinct from KoolbaseObject.publicUrl returning null, which means
+the object is in a private bucket and has no public URL at all. Private
+bucket downloads use getDownloadUrl (async, short-lived presigned URL).
+
 # Flutter dialect — package koolbase_flutter (import 'package:koolbase_flutter/koolbase_flutter.dart')
 
 Initialize:
