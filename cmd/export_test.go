@@ -164,3 +164,40 @@ func TestDifferentDocumentRefuses(t *testing.T) {
 		t.Fatalf("expected refusal for a different document, got %v", err)
 	}
 }
+
+func TestTestDirectoryIsNotStripped(t *testing.T) {
+	dir := t.TempDir()
+	// A zip with a test/ tree, as the Designer emits.
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+	gen := map[string]string{
+		"lib/generated/app.dart":        "// GENERATED\n",
+		"test/generated/home_test.dart": "// GENERATED\n",
+	}
+	var mf []manifestFile
+	for p, b := range gen {
+		sum := sha256.Sum256([]byte(b))
+		mf = append(mf, manifestFile{Path: p, SHA256: hex.EncodeToString(sum[:])})
+		f, _ := w.Create(p)
+		f.Write([]byte(b))
+	}
+	m := exportManifest{DocumentID: "d", GeneratedRoots: []string{"lib/generated/", "test/generated/"}, GeneratedFiles: mf}
+	mj, _ := json.Marshal(m)
+	f, _ := w.Create(manifestPath)
+	f.Write(mj)
+	f, _ = w.Create("lib/main.dart")
+	f.Write([]byte("void main() {}\n"))
+	w.Close()
+	z := filepath.Join(t.TempDir(), "e.zip")
+	os.WriteFile(z, buf.Bytes(), 0o644)
+
+	if err := applyExport(z, dir, false, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if read(t, dir, "test/generated/home_test.dart") == "" {
+		t.Error("test/generated/ was stripped or misplaced")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "generated")); !os.IsNotExist(err) {
+		t.Error("a stray top-level generated/ was created")
+	}
+}

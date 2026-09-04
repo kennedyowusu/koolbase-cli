@@ -310,17 +310,45 @@ func readZip(path string) (map[string][]byte, error) {
 		return nil, fmt.Errorf("opening %s: %w", path, err)
 	}
 	defer r.Close()
+	// Is the whole zip inside one wrapping folder? True when no entry
+	// starts with .koolbase/ and every entry shares the same first segment.
+	wrapped := ""
+	first := ""
+	allShare := true
+	for _, f := range r.File {
+		name := filepath.ToSlash(f.Name)
+		if strings.HasPrefix(name, ".koolbase/") {
+			allShare = false
+			break
+		}
+		seg, _, ok := strings.Cut(name, "/")
+		if !ok {
+			allShare = false
+			break
+		}
+		if first == "" {
+			first = seg
+		} else if seg != first {
+			allShare = false
+			break
+		}
+	}
+	if allShare && first != "" {
+		wrapped = first + "/"
+	}
 	files := map[string][]byte{}
 	for _, f := range r.File {
 		if f.FileInfo().IsDir() {
 			continue
 		}
 		name := filepath.ToSlash(f.Name)
-		// Exports may be rooted in a single top-level folder; strip it so
-		// paths match the manifest.
-		if i := strings.Index(name, "/"); i > 0 && !strings.HasPrefix(name, "lib/") &&
-			!strings.HasPrefix(name, ".koolbase/") && name != "pubspec.yaml" && name != "README.md" {
-			name = name[i+1:]
+		// The Designer's zip is rooted at the project: lib/, test/, .koolbase/
+		// and the top-level files. A zip re-packed by hand with a wrapping
+		// folder is handled by stripping exactly one leading folder when
+		// nothing in the zip starts with .koolbase/. Decided once, below,
+		// not guessed per entry — a per-entry guess stripped test/.
+		if wrapped != "" && strings.HasPrefix(name, wrapped) {
+			name = strings.TrimPrefix(name, wrapped)
 		}
 		if strings.Contains(name, "..") {
 			return nil, fmt.Errorf("refusing zip entry with path traversal: %s", f.Name)
