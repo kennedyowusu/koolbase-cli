@@ -42,7 +42,7 @@ type exportManifest struct {
 	DocumentName     string         `json:"document_name"`
 	SchemaVersion    int            `json:"schema_version"`
 	ExporterVersion  int            `json:"exporter_version"`
-	GeneratedRoot    string         `json:"generated_root"`
+	GeneratedRoots   []string       `json:"generated_roots"`
 	OwnedByDeveloper []string       `json:"owned_by_developer"`
 	GeneratedFiles   []manifestFile `json:"generated_files"`
 }
@@ -92,8 +92,8 @@ func applyExport(zipPath, into string, force bool, out io.Writer) error {
 	if err := json.Unmarshal(raw, &next); err != nil {
 		return fmt.Errorf("export manifest is unreadable: %w", err)
 	}
-	if next.GeneratedRoot == "" {
-		return fmt.Errorf("export manifest names no generated root")
+	if len(next.GeneratedRoots) == 0 {
+		return fmt.Errorf("export manifest names no generated roots")
 	}
 
 	prevPath := filepath.Join(into, manifestPath)
@@ -147,39 +147,18 @@ func applyFresh(incoming map[string][]byte, into string, out io.Writer) error {
 }
 
 func applyReplace(incoming map[string][]byte, next, prev exportManifest, into string, edited []string, out io.Writer) error {
-	root := next.GeneratedRoot
-
-	// Transactional: build the new generated tree beside the old one, and
-	// swap only after every file is written. A failure part-way leaves
-	// the existing tree untouched.
-	liveDir := filepath.Join(into, filepath.Clean(root))
-	stageDir := liveDir + ".koolbase-next"
-	backupDir := liveDir + ".koolbase-prev"
-	_ = os.RemoveAll(stageDir)
-	_ = os.RemoveAll(backupDir)
-
+	// Transactional per root: build each new tree beside the old one and
+	// swap only after every file is written. A failure part-way leaves the
+	// existing tree untouched. Roots are independent — lib/generated/ and
+	// test/generated/ today.
 	written := 0
-	for _, p := range sortedKeys(incoming) {
-		if !strings.HasPrefix(p, root) {
-			continue
-		}
-		rel := strings.TrimPrefix(p, root)
-		if err := writeFile(filepath.Join(stageDir, rel), incoming[p]); err != nil {
-			_ = os.RemoveAll(stageDir)
+	for _, root := range next.GeneratedRoots {
+		n, err := replaceRoot(incoming, root, into)
+		if err != nil {
 			return err
 		}
-		written++
+		written += n
 	}
-
-	if err := os.Rename(liveDir, backupDir); err != nil && !os.IsNotExist(err) {
-		_ = os.RemoveAll(stageDir)
-		return fmt.Errorf("moving old generated tree aside: %w", err)
-	}
-	if err := os.Rename(stageDir, liveDir); err != nil {
-		_ = os.Rename(backupDir, liveDir)
-		return fmt.Errorf("swapping in new generated tree: %w", err)
-	}
-	_ = os.RemoveAll(backupDir)
 
 	if err := writeFile(filepath.Join(into, manifestPath), incoming[manifestPath]); err != nil {
 		return err
@@ -198,7 +177,7 @@ func applyReplace(incoming map[string][]byte, next, prev exportManifest, into st
 		}
 	}
 
-	fmt.Fprintf(out, "Replaced %s (%d files)\n", root, written)
+	fmt.Fprintf(out, "Replaced %s (%d files)\n", strings.Join(next.GeneratedRoots, ", "), written)
 	if len(removed) > 0 {
 		fmt.Fprintf(out, "Removed %d generated file(s) no longer in the design:\n", len(removed))
 		for _, p := range removed {
@@ -215,6 +194,42 @@ func applyReplace(incoming map[string][]byte, next, prev exportManifest, into st
 	reportPubspecDelta(incoming, into, out)
 	fmt.Fprintln(out, "\nDeveloper files untouched: "+strings.Join(next.OwnedByDeveloper, ", "))
 	return nil
+}
+
+func replaceRoot(incoming map[string][]byte, root, into string) (int, error) {
+	liveDir := filepath.Join(into, filepath.Clean(root))
+	stageDir := liveDir + ".koolbase-next"
+	backupDir := liveDir + ".koolbase-prev"
+	_ = os.RemoveAll(stageDir)
+	_ = os.RemoveAll(backupDir)
+
+	written := 0
+	for _, p := range sortedKeys(incoming) {
+		if !strings.HasPrefix(p, root) {
+			continue
+		}
+		rel := strings.TrimPrefix(p, root)
+		if err := writeFile(filepath.Join(stageDir, rel), incoming[p]); err != nil {
+			_ = os.RemoveAll(stageDir)
+			return 0, err
+		}
+		written++
+	}
+	if written == 0 {
+		_ = os.RemoveAll(stageDir)
+		return 0, nil
+	}
+
+	if err := os.Rename(liveDir, backupDir); err != nil && !os.IsNotExist(err) {
+		_ = os.RemoveAll(stageDir)
+		return 0, fmt.Errorf("moving old %s aside: %w", root, err)
+	}
+	if err := os.Rename(stageDir, liveDir); err != nil {
+		_ = os.Rename(backupDir, liveDir)
+		return 0, fmt.Errorf("swapping in new %s: %w", root, err)
+	}
+	_ = os.RemoveAll(backupDir)
+	return written, nil
 }
 
 func detectEdits(prev exportManifest, into string) []string {

@@ -30,7 +30,7 @@ func makeExport(t *testing.T, docID string, screens map[string]string, pubspecDe
 	}
 	m := exportManifest{
 		DocumentID: docID, DocumentName: "T", SchemaVersion: 3, ExporterVersion: 2,
-		GeneratedRoot: "lib/generated/", OwnedByDeveloper: []string{"lib/main.dart", "pubspec.yaml"},
+		GeneratedRoots: []string{"lib/generated/"}, OwnedByDeveloper: []string{"lib/main.dart", "pubspec.yaml"},
 		GeneratedFiles: mf,
 	}
 	mj, _ := json.Marshal(m)
